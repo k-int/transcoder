@@ -1,0 +1,2204 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content=
+  "text/html; charset=us-ascii" />
+  <meta name="generator" content="Claude" />
+  <meta name="version" content="1.0" />
+  <meta name="copyright" content=
+  "Copyright (c) 2004, 2005, 2006 Ostyn Consulting -- All rights reserved" />
+  <meta name="description" content=
+  "Wrapper for SCORM 1.2 SCOs to allow them to run in SCORM 2004 SCOs. Basically a smart passthrough to a RTE. To use as passthrough, specify the SCO to launch as a parameter named SCO (case insensitive) in the launch URL for the wrapper, and any original parameters after that." />
+
+  <title>Claude's Easy SCO Adapter for SCORM 1.2 to 2004</title>
+  <!--
+Claude's Easy SCO Adapter for SCORM 1.2 to 2004
+Copyright (C) 2004, 2005, 2006 Claude Ostyn
+
+This web page is only useful as a library in conjunction with
+other software, typically a SCORM package or a SCORM runtime
+environment.
+
+It is free software; you can use it, redistribute it and/or
+modify it under the terms of the GNU Lesser General Public
+License as published by the Free Software Foundation; either
+version 2.1 of the License, or (at your option) any later version.
+
+This library is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. USE AT
+YOUR OWN RISK. See the GNU Lesser General Public License
+for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this library; if not, write to the Free Software
+Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+or see http://www.gnu.org/copyleft/lesser.html
+
+Change log:
+0.0.6 == First public release, withdrawn
+0.0.9 == First public release on Ostyn.com web site
+0.0.96 == Add compatibility with SCORM 2004 objective mapping even
+          for SCOs that don't properly detect already defined
+          objectives.
+          Fix a typo in initial status detection
+          Fix a typo in passing score down-translation
+0.0.97 == Fix problem with objective remapping, some data element translations
+0.0.98 == Fix GetValue for interactions
+          Replaced _GetAPI function with browser security resilient version
+          Documentation edit to clarify parameter usage
+0.0.99 == Fix to handle subpaths in the SCO parameter correctly
+1.0    == Bug fix completion_measure -) progress_measure Thank you Nick Webb
+          Status = browsed is now a no error no-op for the SCO as well as objectives
+-->
+
+<script type="text/javascript">
+//<![CDATA[
+
+var gsVERSION = "1.0";
+
+// ========= MAGIC VALUES ===========
+
+/*** Parameter name for the URL of the SCO to launch ***/
+var gsPARAM_NAME_FOR_URL_OF_SCO = 'SCO';
+
+/*** Debug flag. If true, alerts may be shown for some significant errors ***/
+// Not completely implemented
+var gbDebugSession = false; // default should be false
+
+// If URL param for has value == 1, debug flag will be turned on.
+var gsPARAM_NAME_FOR_DEBUG_FLAG = 'ESASDEBUG';
+
+// ========= MAGIC VALUES FOR SCORE NORMALIZATION =============
+
+// Default values will be assumed if not otherwise specified for score min and max
+// You can override them by specifying the parameters below in the URL.
+// These will be used to calculate the scaled score required by sequencing.
+var gn12ScoreMin = 0;
+var gn12ScoreMax = 100;
+
+/*** Parameter name for the optional min score assumed by the SCO to launch ***/
+var gsPARAM_NAME_FOR_SCORE_MIN = 'ESASSCOREMIN';
+
+/*** Parameter name for the optional min score assumed by the SCO to launch ***/
+var gsPARAM_NAME_FOR_SCORE_MAX = 'ESASSCOREMAX';
+
+// ========= LOCALIZATION ===========
+
+var gsSCO_TRIES_TO_GRAB_TOP_WINDOW = 'Fatal SCO error: '
+  + 'The SCO is trying to grab or close a parent window. '
+  + 'The wrapper is destroyed. '
+  + 'Results will be unpredictable.';
+var gsINVALID_PARAM_FOR_URL_OF_SCO = 'Conversion wrapper error: '
+  + 'The parameter to specify the SCO to launch is missing from the URL.';
+var gsEXPLAIN_DOC_SHOWN = "Displaying help text because there is no URL to launch.";
+var gs_HELP_TEXT = 'Sorry, help not available yet.';
+
+// ========= GENERIC UTILITY FUNCTIONS =========
+function trim(str)
+{
+  if (str == null) return "";
+  return str.replace(/^\s*(\b.*\b|)\s*$/, "$1");
+}
+
+function compareStr(sA,sB)
+{
+  if (sA > sB) return 1;
+  if (sA < sB) return -1;
+  return 0;
+}
+
+function isPositiveInt(n)
+{
+  //alert("isPositiveInt param = " + n + " type = " + typeof(n));
+  return ((!isNaN(n)) && (Math.round(n) == n) && (n >= 0));
+}
+
+function IsInList(s,sList)
+{
+  var a = sList.split(",");
+  for (i=0;i<sList.length;i++)
+  {
+    if (a[i] == s) return true;
+  }
+  return false;
+}
+
+
+// Parse any parameters passed on command line
+
+var gaURLParams = new Array();
+
+function xxxURLParams2Array() {
+  var nameVal = null;   // Holds array for a single name-value pair.
+  var i = 0;
+  var a = 0;
+  var v = "";
+
+  inString = window.location.href;
+  if (inString.indexOf("?")) inString = inString.substr(inString.indexOf("?")+1)
+
+  // If URL contains a query string, grabs it.
+  if (inString.charAt(0) == "?") {
+        // Removes "?" character from query string.
+        inString = inString.substring(1, inString.length);
+  }
+  if (inString.length > 0) {
+     var aKeypairs = inString.split("&")
+     // Loops through name-value pairs.
+     for (i=0;i<aKeypairs.length;i++) {
+    // Splits name-value into array (nameVal[0]=name, nameVal[1]=value).
+      nameVal = aKeypairs[i].split("=");
+      v = nameVal[1]
+      while ((v) && (v.indexOf('+') > -1)) {
+        //Got to do this the hard way because of IE
+        //bug with 'g' in regular expression /+/g
+        v = v.substring(0,v.indexOf('+')) + ' ' + v.substring(v.indexOf('+') + 1);
+      }//while
+      if (v)
+      {
+        nameVal[1]= unescape(v);
+        gaURLParams[gaURLParams.length] = nameVal;
+      }
+    }
+  }
+}
+
+function URLParams2Array() {
+
+  // This is a special version of this function.
+  // It stops parsing when it encounters the parameter specified
+  // by the value of gsPARAM_NAME_FOR_URL_OF_SCO (usually "SCO")
+  // and stores the rest of the query string as the value for
+  // that parameter.
+  var nameVal = null;   // Holds array for a single name-value pair.
+  var i = 0;
+  var a = 0;
+  var v = "";
+  var aKeyPair = null;
+
+  var s = window.location.href;
+  if (s.indexOf("?")>0)
+  {
+    s = s.substr(s.indexOf("?")+1)
+  }
+  else
+  {
+    return;
+  }
+  while (s != "")
+  {
+    val = "";
+    p = s.indexOf("=")
+    if (p > -1)
+    {
+      nam = s.substr(0,p);
+      if (nam.toUpperCase() == gsPARAM_NAME_FOR_URL_OF_SCO)
+      {
+        val = s.substr(p+1);
+        s = "";
+      }
+      else
+      {
+        p2 = s.indexOf("&");
+        if (p2 > -1)
+        {
+          val = s.substring(p+1,p2);
+          s = s.substr(p2+1);
+        }
+        else
+        {
+          val = s.substr(p+1);
+          s = "";
+        }
+      }
+      if (val != "")
+      {
+        gaURLParams[gaURLParams.length] = new Array(nam.toUpperCase(),val);
+      }
+    }
+    else
+    {
+      break;
+    }
+  }
+}
+
+
+
+function GetURLParam(nam) {
+  nam=nam.toUpperCase();
+  for (i=0;i<gaURLParams.length;i++){
+    if (gaURLParams[i][0].toUpperCase()==nam){
+      return gaURLParams[i][1]
+    }
+  }
+  return ""
+}
+
+// Read parameters when instantiating script
+URLParams2Array();
+
+if (GetURLParam("gsPARAM_NAME_FOR_DEBUG_FLAG").toUpperCase().indexOf("1") == 0) gbDebugSession == true;
+
+
+// ========= MAKE THIS WORK AS A SCO ===========
+//// "Private" section - data and functions used by the script functions
+//// and which should not be called or inspected directly by a SCO -
+//// are identified by a leading underscore in the variable name
+//// or function name
+
+/*** Variables used in session management ***/
+var _gAPI = null;
+var _gnWrapperAsSCOSessionState = 0;
+  // 0=not initialized yet; 1=initializing; 2=initialized; 3=terminating;
+  // 4=terminated; -1=Scorm session cannot be established.
+
+/***  API communication session management functions ***
+ These functions and the associated global variables allow this
+ script to locate the API implementation, and to
+ initialize and terminate the communication session automatically.
+
+ Statements in this section allow the generic script to be invoked
+ to initialize and terminate the session without having to add
+ onunload, onbeforeunload and onunload handlers to the body or
+ frameset element of each SCO that uses this script.
+ In other words, by just including this script you can turn just
+ about any web page into a SCO.
+*/
+
+function _GetAPI(win)
+{
+  var ScanForAPI = function(win)
+  {
+    var nFindAPITries = 500; // paranoid to prevent runaway
+    var objAPI = null;
+    var bOK = true;
+    var wndParent = null;
+    while ((!objAPI)&&(bOK)&&(nFindAPITries>0))
+    {
+      nFindAPITries--;
+      try { objAPI = win.API_1484_11; } catch (e) { bOK = false; }
+      if ((!objAPI)&&(bOK))
+      {
+        try { wndParent = win.parent; } catch (e) { bOK = false; }
+        if ((!bOK)||(!wndParent)||(wndParent==win))
+        {
+          break;
+        }
+        win = wndParent;
+      }
+    }
+    return objAPI;
+  }
+
+  var wndParent = null;
+  var wndOpener = null;
+  try { wndParent = win.parent; } catch(e) { }
+  try { wndOpener = win.opener; } catch(e) { }
+  if ((wndParent != null) && (wndParent != win))
+  {
+    _gAPI = ScanForAPI(wndParent);
+  }
+  if ((_gAPI == null) && (wndOpener != null))
+  {
+    _gAPI = ScanForAPI(wndOpener);
+  }
+}
+
+/*** Generic session management functions ***/
+function ScormVersion() // Hard wired - this script supports only SCORM 2004
+{
+  if (_gnWrapperAsSCOSessionState > 0) return "SCORM 2004";
+  return "unknown"
+}
+
+function ScormInitialize()
+{
+  //if (gbDebugSession) alert("Calling Initialize");
+
+  // Check that initialize makes sense, otherwise forget it.
+  if (_gnWrapperAsSCOSessionState != 0) return "false";
+  _GetAPI(window);
+  if (_gAPI == null)
+  {
+    if (gbDebugSession) alert("No API implementation found");
+  }
+  else
+  {
+    _gnWrapperAsSCOSessionState = 1; // State is "initializing"
+    if (_gAPI.Initialize("") == "true")
+    {
+      _gnWrapperAsSCOSessionState = 2; // We are now "in session"
+      // Communication session is now initialized and ready to go
+
+      // Get preset objective IDs before anything bad can happen
+      GetPresetIdsObjectives2004();
+
+      return "true";
+    }
+  }
+  if (gbDebugSession) alert("Initialize failed");
+  _gnWrapperAsSCOSessionState = -1; // State is "error". Give up.
+  return "false";
+}
+
+function ScormTerminate()
+{
+  // Do it only if in session, and prevent reentrance.
+  if (_gnWrapperAsSCOSessionState == 2)
+  {
+    // if (gbDebugSession) alert("Terminating");
+
+    _gnWrapperAsSCOSessionState = 3; // State is "terminating"
+    // Now call the API implementation to terminate the session
+    if (_gAPI.Terminate("") == "true")
+    {
+      _gnWrapperAsSCOSessionState = 4; // State is "terminated"
+      return "true";
+    }
+    else
+    {
+      // Keep trying? -- TBD
+    }
+  }
+  return "false";
+}
+
+/***  Load and unload event management functions ***
+ These functions allow the generic script to be invoked
+ to initialize and terminate the session without having to add
+ onunload and onunload handlers to the body or frameset element
+ of the actual SCO. In other words, by just including this
+ script these functions can turn just about any web page into a SCO.
+*/
+
+/* Relay function for onload event */
+function _Scorm_InitSession()
+{
+  ScormInitialize();
+}
+
+/* Relay function for onbeforeunload and onunload events */
+function _Scorm_TerminateSession()
+{
+  // Trap used to detect if a SCO is trying to grab
+  // the top window when launched
+  if (gbInScoLaunch)
+  {
+    //alert(gsSCO_TRIES_TO_GRAB_TOP_WINDOW); // Unrecoverable error
+  }
+  else
+  {
+    if (gbSCOLoaded) UnloadSCO();
+  }
+
+  ScormTerminate();
+  // You cannot use this event to prevent unloading
+  // in onbeforeunload, therefore this function must
+  // specify explicitly that it has no return value.
+  return;
+}
+
+// Add the functions to the window prototype
+// This is what automates the load/unload event handling
+window.onload=_Scorm_InitSession;
+window.onbeforeunload=_Scorm_TerminateSession;
+window.onunload=_Scorm_TerminateSession;
+
+/*** End load and unload event management functions ***/
+
+/*** General session info helper functions ***/
+
+function ScormIsInSession()
+{
+  // Returns true is SetValue and GetValue are allowed
+  return ((_gnWrapperAsSCOSessionState == 2) || (_gnWrapperAsSCOSessionState == 3));
+}
+
+function ScormGetSessionState()
+{
+  return _gnWrapperAsSCOSessionState;
+}
+
+function ScormGetLastError()
+{
+  var nErr = -1;
+  if (_gAPI) nErr = _gAPI.GetLastError();
+  return nErr;
+}
+function ScormGetErrorString(nErr)
+{
+  var strErr = "SCORM API not available";
+  if (_gAPI)
+  {
+    if (isNaN(nErr)) nErr = parseInt(nErr);
+    // Note: Get Error functions may work even if the session is not open
+    // (to help diagnose session management errors), but we're still careful,
+    // and so we check whether each function is available before calling it.
+    if ((isNaN(nErr)) && (_gAPI.GetLastError)) nErr = _gAPI.GetLastError();
+
+    if (_gAPI.GetErrorString) strErr = _gAPI.GetErrorString(nErr.toString());
+  }
+  return strErr;
+}
+
+function ScormGetDiagnostic(str)
+{
+  var strR = "";
+  if (_gAPI)
+  {
+    strR = _gAPI.GetDiagnostic(str.toString());
+  }
+  return strR;
+}
+
+/*** General data helper functions ***/
+function ScormGetValue(what, bIgnoreError)
+{
+  // bIgnoreError flag is set to true only when this function is used
+  // for testing, for example to query a value that does not exist yet.
+  var strR = "";
+  if (ScormIsInSession())
+  {
+    strR = _gAPI.GetValue(what);
+    if ((!bIgnoreError) && (gbDebugSession) && (strR=="") && (ScormGetLastError()!=0))
+    {
+      alert("GetValue Error:\nParam='" + what +
+        "'\n\nError=" + ScormGetLastError() + "\n" + ScormGetErrorString());
+    }
+  }
+  return strR;
+}
+
+function ScormSetValue(what, value)
+{
+  //alert("ScormSetValue in converter\nwhat=" + what + "\nval="  + value); //debug
+  var err = "false"
+  if ((what==null) || (value==null))
+  {
+    gnErr = 201;
+    return err;
+  }
+  if (ScormIsInSession())
+  {
+    gnErr = 0;
+    err = _gAPI.SetValue(what, value.toString());
+    if ((gbDebugSession) && (err == "false"))
+    {
+      alert("GetValue Error:\nParam1='" + what + "'\n\nParam2='" + value +
+        "'\n\nError=" + ScormGetLastError() + "\n" + ScormGetErrorString());
+    }
+  }
+  return err;
+}
+
+function ScormCommit()
+{
+  if (ScormIsInSession())
+  {
+    return _gAPI.Commit("");
+  }
+  return "false";
+}
+
+// ========= TIME AND DURATION FUNCTIONS ========
+function centisecsToISODuration(n, bPrecise)
+{
+  // Note: SCORM and IEEE 1484.11.1 require centisec precision
+  // Parameters:
+  // n = number of centiseconds
+  // bPrecise = optional parameter; if true, duration will
+  // be expressed without using year and/or month fields.
+  // If bPrecise is not true, and the duration is long,
+  // months are calculated by approximation based on average number
+  // of days over 4 years (365*4+1), not counting the extra days
+  // for leap years. If a reference date was available,
+  // the calculation could be more precise, but becomes complex,
+  // since the exact result depends on where the reference date
+  // falls within the period (e.g. beginning, end or ???)
+  // 1 year ~ (365*4+1)/4*60*60*24*100 = 3155760000 centiseconds
+  // 1 month ~ (365*4+1)/48*60*60*24*100 = 262980000 centiseconds
+  // 1 day = 8640000 centiseconds
+  // 1 hour = 360000 centiseconds
+  // 1 minute = 6000 centiseconds
+  var str = "P";
+  var nCs=n;
+  var nY=0, nM=0, nD=0, nH=0, nMin=0, nS=0;
+  n = Math.max(n,0); // there is no such thing as a negative duration
+  var nCs = n;
+  // Next set of operations uses whole seconds
+  with (Math)
+  {
+    if (bPrecise == true)
+    {
+      nD = floor(nCs / 8640000);
+    }
+    else
+    {
+      nY = floor(nCs / 3155760000);
+      nCs -= nY * 3155760000;
+      nM = floor(nCs / 262980000);
+      nCs -= nM * 262980000;
+      nD = floor(nCs / 8640000);
+    }
+    nCs -= nD * 8640000;
+    nH = floor(nCs / 360000);
+    nCs -= nH * 360000;
+    var nMin = floor(nCs /6000);
+    nCs -= nMin * 6000
+  }
+  // Now we can construct string
+  if (nY > 0) str += nY + "Y";
+  if (nM > 0) str += nM + "M";
+  if (nD > 0) str += nD + "D";
+  if ((nH > 0) || (nMin > 0) || (nCs > 0))
+  {
+    str += "T";
+    if (nH > 0) str += nH + "H";
+    if (nMin > 0) str += nMin + "M";
+    if (nCs > 0) str += (nCs / 100) + "S";
+  }
+  if (str == "P") str = "PT0H0M0S";
+  // technically PT0S should do but SCORM test suite assumes longer form.
+  return str;
+}
+
+function ISODurationToCentisec(str)
+{
+  // Only gross syntax check is performed here
+  // Months calculated by approximation based on average number
+  // of days over 4 years (365*4+1), not counting the extra days
+  // in leap years. If a reference date was available,
+  // the calculation could be more precise, but becomes complex,
+  // since the exact result depends on where the reference date
+  // falls within the period (e.g. beginning, end or ???)
+  // 1 year ~ (365*4+1)/4*60*60*24*100 = 3155760000 centiseconds
+  // 1 month ~ (365*4+1)/48*60*60*24*100 = 262980000 centiseconds
+  // 1 day = 8640000 centiseconds
+  // 1 hour = 360000 centiseconds
+  // 1 minute = 6000 centiseconds
+  var aV = new Array(0,0,0,0,0,0);
+  var bErr = false;
+  var bTFound = false;
+  if (str.indexOf("P") != 0) bErr = true;
+  if (!bErr)
+  {
+    var aT = new Array("Y","M","D","H","M","S")
+    var p=0, i=0;
+    str = str.substr(1); //get past the P
+    for (i = 0 ; i < aT.length; i++)
+    {
+      if (str.indexOf("T") == 0)
+      {
+        str = str.substr(1);
+        i = Math.max(i,3);
+        bTFound = true;
+      }
+      p = str.indexOf(aT[i]);
+      //alert("Checking for " + aT[i] + "\nstr = " + str);
+      if (p > -1)
+      {
+        // Is this a M before or after T?
+        if ((i == 1) && (str.indexOf("T") > -1) && (str.indexOf("T") < p)) continue;
+        if (aT[i] == "S")
+        {
+          aV[i] = parseFloat(str.substr(0,p))
+        }
+        else
+        {
+          aV[i] = parseInt(str.substr(0,p))
+        }
+        if (isNaN(aV[i]))
+        {
+          bErr = true;
+          break;
+        }
+        else if ((i > 2) && (!bTFound))
+        {
+          bErr = true;
+          break;
+        }
+        str = str.substr(p+1);
+      }
+    }
+    if ((!bErr) && (str.length != 0)) bErr = true;
+    //alert(aV.toString())
+  }
+  if (bErr)
+  {
+    //alert("Bad format: " + str)
+    return
+  }
+  return aV[0]*3155760000 + aV[1]*262980000
+    + aV[2]*8640000 + aV[3]*360000 + aV[4]*6000
+    + Math.round(aV[5]*100)
+}
+
+// Legacy functions to translate to/from SCORM 1.2 format
+
+function SCORM12DurationToCs(str)
+{
+  // Format is [HH]HH:MM:SS[.SS] or maybe sometimes MM:SS[.SS]
+  // Does not catch all possible errors
+  // First convert to centisecs
+  var a=str.split(":");
+  var nS=0, n=0;
+  var nMult = 1;
+  var bErr = ((a.length < 2) || (a.length > 3));
+  if (!bErr)
+  {
+    for (i=a.length-1;i >= 0; i--)
+    {
+      n = parseFloat(a[i]);
+      if (isNaN(n))
+      {
+        bErr = true;
+        break;
+      }
+      nS += n * nMult;
+      nMult *= 60;
+    }
+  }
+  if (bErr)
+  {
+    // alert ("Incorrect format: " + str + "\n\nFormat must be [HH]HH:MM:SS[.SS]");
+    return NaN;
+  }
+  return Math.round(nS * 100);
+}
+
+function centisecsToSCORM12Duration(n)
+{
+  // Format is [HH]HH:MM:SS[.SS]
+  var bTruncated = false;
+  with (Math)
+  {
+    var nH = floor(n / 360000);
+    var nCs = n - nH * 360000;
+    var nM = floor(nCs / 6000);
+    nCs = nCs - nM * 6000;
+    var nS = floor(nCs / 100);
+    nCs = nCs - nS * 100;
+  }
+  if (nH > 9999)
+  {
+    nH = 9999;
+    bTruncated = true;
+  }
+  var str = "0000" + nH + ":";
+  str = str.substr(str.length-5,5);
+  if (nM < 10) str += "0";
+  str += nM + ":";
+  if (nS < 10) str += "0";
+  str += nS;
+  if (nCs > 0)
+  {
+    str += ".";
+    if (nCs < 10) str += "0";
+    str += nCs;
+  }
+  //if (bTruncated) alert ("Hours truncated to 9999 to fit HHHH:MM:SS.SS format")
+  return str;
+}
+
+
+/*** time stamp helper function. Returns a time stamp in ISO format ***/
+
+function MakeISOtimeStamp(objSrcDate, bRelative, nResolution)
+{
+  // Make an ISO 8601 time stamp string as specified for SCORM 2004
+  // * objDate is an optional ECMAScript Date object;
+  //   if objDate is null, "this instant" is assumed.
+  // * bRelative is optional; if bRelative is true,
+  //   the time stamp will show local time with a time offset from UTC;
+  //   otherwise the time stamp will show UTC (a.k.a. Zulu) time.
+  // * nResolution is optional; it specifies max decimal digits
+  //   for fractions of second; it can be null, 0 or 2. If null, 2 is assumed.
+  var s = "";
+  var nY=0, nM=0, nD=0, nH=0, nMin=0, nS=0, nMs=0, nCs = 0;
+  var bCentisecs =  ((isNaN(nResolution)) || (nResolution != 0));
+  // Need to make a copy of the source date object because we will
+  // tweak it if we need to round up to next second
+  if (objSrcDate == null) objSrcDate = new Date();
+  objDate = new Date();
+  with (objDate)
+  {
+    setTime(objSrcDate.getTime());
+    ((bRelative)? nMs = getMilliseconds(): nMs = getUTCMilliseconds());
+
+    if (bCentisecs)
+    {
+      // Default precision is centisecond. Let us see whether we need to add
+      // a rounding up adjustment
+      if (nMs > 994)
+      {
+        ((bRelative)? setMilliseconds(1000): setUTCMilliseconds(1000));
+      }
+      else
+      {
+        nCs = Math.floor(nMs / 10);
+      }
+    }
+    else
+    {
+      // Precision is whole seconds; round up if necessary
+      if (nMs > 499)
+      {
+        ((bRelative)? setMilliseconds(1000): setUTCMilliseconds(1000));
+      }
+    }
+    if (bRelative)
+    {
+      nY = getFullYear();
+      nM = getMonth();
+      nD = getDate();
+      nH = getHours();
+      nMin = getMinutes();
+      nS = getSeconds();
+    }
+    else
+    {
+      nY = getUTCFullYear();
+      nM = getUTCMonth();
+      nD = getUTCDate();
+      nH = getUTCHours();
+      nMin = getUTCMinutes();
+      nS = getUTCSeconds();
+    }
+  }
+  // Note: Date.Month() and Date.UTCMonth() are base 0 not 1
+  s = nY + "-" +
+    ZeroPad(nM+1, 2) + "-" +
+    ZeroPad(nD, 2) + "T" +
+    ZeroPad(nH, 2) + ":" +
+    ZeroPad(nMin, 2) + ":" +
+    ZeroPad(nS,2);
+  if (nCs > 0)
+  {
+    s += "." + ZeroPad(nCs,2);
+  }
+  if (bRelative)
+  {
+    // Need to flip the sign of the time zone offset
+    var nTZOff = -objDate.getTimezoneOffset();
+    if (nTZOff >= 0) s += "+";
+    s += ZeroPad(Math.round(nTZOff / 60), 2);
+    nTZOff = nTZOff % 60;
+    if (nTZOff > 0) s += ":" +  ZeroPad(nTZOff, 2);
+  }
+  else
+  {
+    s += "Z";
+  }
+  return s;
+}
+
+function ZeroPad(n, nLength)
+{
+  // Takes a number and pads it with leading 0 to the length specified.
+  // The padded length does not include negative sign if present.
+  var bNeg = (n < 0);
+  var s = n.toString();
+  if (bNeg) s = s.substr(1,s.length);
+  while (s.length < nLength) s = "0" + s;
+  if (bNeg) s = "-" + s;
+  return s
+}
+
+var gsParseErr = "";
+
+function DateFromISOString(strDate)
+{
+  // Convert an ISO 8601 formatted string to a local date
+  // Returns an ECMAScript Date object or null if an error was detected
+  // Assumes that the string is well formed and SCORM conformant
+  // otherwise a runtime error may occur in this function.
+  // In practice the data range is limited to the date range supported
+  // by the ECMAScript Date object. See the ECMAScript standard for details.
+  var sDate = strDate; // The date part of the input, after a little massaging
+  var sTime = null; // The time part of the input, if it is included
+  var sTimeOffset = null; // UTC offset, if specified in the input string
+  var sUTCOffsetSign = "";
+  var a = null; // Will be reused for all kinds of string splits
+  var n=0, nY=0, nM=0, nD=1, nH=0, nMin=0, nS=0, nMs = 0;
+
+  gsParseErr = "";
+
+  // If this is "Zulu" time, it will make things a little easier
+  var bZulu = (sDate.indexOf("Z") > -1);
+  if (bZulu) sDate = sDate.substr(0, sDate.length - 1);
+
+  // Parse the ISO string into date and time
+  if (sDate.indexOf("T") > -1)
+  {
+    var a = sDate.split("T");
+    sDate = a[0];
+    var sTime = a[1];
+  }
+  // Parse the date part
+  a = sDate.split("-");
+  nY = parseInt(a[0],10);
+  if ((isNaN(nY)) || (nY > 9999) || (nY < 0000))
+  {
+    gsParseErr = "Invalid year value:\n" +  strDate;
+    return null;
+  }
+  if (a.length > 1)
+  {
+    nM = parseInt(a[1],10) - 1; // months are in base 0
+    if (nM < 0) alert("a[1] =" + a[1] + " from " + strDate);
+    if (a.length > 2)
+    {
+      nD = parseInt(a[2],10); // days are in base 1
+    }
+  }
+  // Done with the date. If there is a time part, parse it out.
+  if (sTime)
+  {
+    if (sTime.indexOf("-") > -1) sUTCOffsetSign = "-";
+    if (sTime.indexOf("+") > -1) sUTCOffsetSign = "+";
+    if (sUTCOffsetSign != "")
+    {
+      if (bZulu)
+      {
+        gsParseErr = "You can't have both UTC offset and Zulu in ISO time stamp:\n" + strDate;
+         return null;
+      }
+      a = sTime.split(sUTCOffsetSign);
+      sTime = a[0];
+      sTimeOffset = a[1];
+    }
+    a = sTime.split(":");
+    nH = parseInt(a[0],10);
+    if (a.length > 1)
+    {
+      nMin = parseInt(a[1],10);
+      if (a.length > 2)
+      {
+        (a[2].indexOf(".")<0?nS = parseInt(a[2],10) : nS = parseFloat(a[2]));
+        if (isNaN(nS))
+        {
+          gsParseErr = "Error parsing seconds: " + a[2] + "\n" + strDate;
+          return null;
+        }
+        with (Math)
+        {
+          nMs = round((nS % 1) * 1000);
+          nS = floor(nS);
+        }
+      }
+    }
+  }
+  else if (bZulu)
+  {
+    gsParseErr = "UTC not allowed in time stamp unless there is a Time part:\n" + strDate;
+    return null;
+  }
+  var objDate = new Date();
+  with (objDate)
+  {
+    if (bZulu)
+    {
+      setUTCFullYear(nY,nM,nD);
+      setUTCHours(nH,nMin,nS,nMs);
+    }
+    else
+    {
+      // Calculate and apply the time offset for local time
+      if (sTimeOffset)
+      {
+        var nOffset = 0;
+        a = sTimeOffset.split(":");
+        nOffset = parseInt(a[0]);
+        if (isNaN(nOffset))
+        {
+          gsParseErr = "Found UTC time offset but offset value is NaN:\n" + strDate;
+          return null;
+        }
+        nOffset = nOffset * 60
+        if (a.length > 1)
+        {
+          n = parseInt(a[1]);
+          if (isNaN(n))
+          {
+            gsParseErr = "Found UTC time offset minutes but minute value is NaN:\n" + strDate;
+            return null;
+          }
+          nOffset += n;
+        }
+        nOffset = nOffset * 60; // minutes to milliseconds
+        if (sUTCOffsetSign == "-") nOffset = -nOffset;
+        setTime(getTime() + nOffset);
+      }
+      setFullYear(nY,nM,nD);
+      setHours(nH,nMin,nS,nMs);
+    }
+  }
+  return objDate
+}
+
+function FixDuration(sOld)
+{
+  return centisecsToISODuration(SCORM12DurationToCs(sOld),true);
+}
+
+function FixTimeStamp(sOld)
+{
+        sD = MakeISOtimeStamp(null, true);
+  return sD.substr(0,11) + sOld;
+}
+
+// ========= PSEUDO RTE ===========
+
+// Housekeeping
+var gbInScoLaunch = false;
+
+var gnErr = 0;
+
+var gbSuspended = false;
+
+// Comm session state management
+var gnSCOtoWrapperCommSessionState = 0;
+  // 0 = not initialized; 1 = initialized; 2 = terminated
+
+function VerifySCOtoWrapperCommSessionState()
+{
+  // returns true or false, and sets error state if not true
+  var r = (gnSCOtoWrapperCommSessionState == 1);
+  if (!r)
+  {
+    (gnSCOtoWrapperCommSessionState == 0 ? gnErr = 301 : gnErr = 101);
+    // TBD verify error codes
+  }
+  return r;
+}
+
+function NamedValue(nam,val) // Constructor for a name-value pair
+{
+  this.nam = nam;
+  this.val = val
+}
+
+function SetValueByName(nam,val)
+{
+  var n = -1;
+  for (i=0;i<gaNamedValues.length;i++)  if (gaNamedValues[i].nam == nam) n = i;
+  if (n == -1) gaNamedValues[gaNamedValues.length] = new NamedValue(nam,val);
+  else gaNamedValues[n].val = val;
+   return 0;
+}
+
+function GetValueByName(nam)
+{
+  var n = -1;
+  for (i=0;i<gaNamedValues.length;i++)  if (gaNamedValues[i].nam == nam) n = i;
+  if (n == -1) return null;
+  else return gaNamedValues[n].val;
+}
+
+function StripLeadingDots(s, n)
+{
+  var p = 0;
+  // strip n dotted elements in dot notation
+  var a = s.split(".");
+  for (i = 0; i< n; i++) p += a[i].length + 1;
+  return s.substr(p);
+}
+
+function Score() // Constructor for a new score
+{
+  this.scaled = "";
+  this.raw = "";
+  this.min = gn12ScoreMin + "";
+  this.max = gn12ScoreMax + "";
+}
+
+// Score for the SCO
+var gaSCOScore = new Score();
+// Array of scores for objectives
+var gaObjScores = new Array();
+
+function ScoreMagic(aScore, what, val)
+{
+  // Synthesize a scaled score
+
+  // alert("ScoreMagic: " + what + " " + val);
+  nVal = parseFloat(val);
+
+  if (!isNaN(nVal))
+  {
+    switch(what)
+    {
+        case "raw":
+        aScore.raw = val + "";
+        var nMin = parseFloat(aScore.min);
+        var nMax = parseFloat(aScore.max);
+        if ((!isNaN(nMin)) && (!isNaN(nMax)))
+        {
+          if (nVal <= nMax)
+          {
+            aScore.scaled = ((val - nMin) / (nMax - nMin)) + "";
+          }
+        }
+        break;
+      case "min":
+        aScore.min = val + "";
+        break;
+      case "max":
+        aScore.max = val + "";
+        break;
+     }
+  }
+  return 0
+}
+
+function RawPassingScoreFromScaled(n)
+{
+  // Synthesize a scaled score
+  return n * (parseFloat(gaSCOScore.max)- parseFloat(gaSCOScore.min)) + parseFloat(gaSCOScore.min);
+}
+
+
+
+function GetValueScore(aScore, what)
+{
+  var r = "";
+  var nErr = 0;
+  switch(what)
+  {
+    case "scaled":
+      r = aScore.scaled;
+      break;
+    case "raw":
+      r = aScore.raw;
+      break;
+    case "min":
+      r = aScore.min;
+      break;
+    case "max":
+      r = aScore.max;
+      break;
+    case "_children":
+        r = "min,max,raw";
+        break;
+    default:
+      gnErr = 201;
+  }
+  return r
+}
+
+
+function Interaction(id) // Constructor for a new interaction record
+{
+  this.id = id;
+  this.type= "";
+  this.description = "";
+  this.latency = "";
+  this.timestamp = "";
+  this.result = "";
+  this.weighting = "";
+  this.correct_responses = new Array();
+  this.learner_response = "";
+  this.objectives = new Array();
+}
+
+function isValidInteractionType(s)
+{
+  var a = new Array("true-false","choice","fill-in",
+     "long-fill-in","likert","matching","performance","sequencing","numeric","other")
+  for (i=0;i<a.length;i++)
+  {
+    if (s == a[i]) return true
+  }
+  return false;
+}
+
+function SetCorrectResponses(nInteraction, n2, nam, val)
+{
+  //alert("Set CorrectResponses\n" + nInteraction + "\n" + n2 + "\n" + nam + "\n" + val)
+  var nErr = 0;
+  var typ = gaInteractions[nInteraction].type;
+  if (typ == null) return 301; // tbd
+  var i = parseInt(n2);
+  if (!isPositiveInt(i)) return 351; // tbd
+  if (nam != "pattern") return 351; // tbd
+  if ((i > 0) && ((typ == "true-false") || (typ == likert))) return 351;
+  if (i > gaInteractions[nInteraction].correct_responses.length) return 351;
+  gaInteractions[nInteraction].correct_responses[i] = val.toString();
+  return 0;
+}
+
+function GetCorrectResponses(nInteraction, n2, nam)
+{
+  //alert("Get CorrectResponses\n" + nInteraction + "\n" + n2 + "\n" + nam)
+  var nErr = 0;
+  var r = "";
+  var typ = gaInteractions[nInteraction].type;
+  if (typ == null) nErr = 301; // tbd
+  else
+  {
+    var i = parseInt(n2);
+    if (!isPositiveInt(i)) nErr = 351; // tbd
+    else if (nam != "pattern") nErr = 351; // tbd
+    else if ((i > 0) && ((typ == "true-false") || (typ == likert))) nErr = 351;
+    else if (i > gaInteractions[nInteraction].correct_responses.length - 1) nErr = 351;
+    else r = gaInteractions[nInteraction].correct_responses[i].toString();
+  }
+  if (nErr != 0) gnErr = nErr;
+  return r
+}
+
+function FixCorrectResponsePattern(val,sType)
+{
+        switch(sType)
+  {
+    case "true-false":
+      val = val.substr(0,1);
+      if ((val=="t")||(val=="1")) val = "true";
+      else if ((val=="f")||(val=="0")) val = "false";
+      else gnErr = 201;
+      break;
+    case "choice":
+    case "sequencing":
+      var a = val.split(",");
+      if (a.length > 1)
+      {
+        val = a[0];
+        for (i=1;i<a.length;i++) val += "[,]" + a[i];
+      }
+      break;
+    case "fill-in":
+        val = "{case_matters}" + val;
+        break;
+    case "likert":
+        break;
+    case "matching":
+      var a = val.split(",");
+      for (i=0;i<a.length;i++)
+      {
+        b = a[i].split(".");
+        a[i] = b[0] + "[.]" + b[1];
+      }
+      val = a[0];
+      for (i=1;i<a.length;i++) val += "[,]" + a[i];
+      break;
+    case "numeric":
+        if (isNaN(parseFloat(val))) gnErr = 201; // tbd check err code
+        break;
+    case "performance":
+        // WAG
+      var a = val.split(",");
+      for (i=0;i<a.length;i++)
+      {
+        a[i] = "[.]" + a[i];
+      }
+      val = a[0];
+      for (i=1;i<a.length;i++) val += "[,]" + a[i];
+      break;
+    default:
+      gnErr = 301;
+  }
+  return val;
+}
+
+function FixLearnerResponsePattern(val,sType)
+{
+        switch(sType)
+  {
+    case "true-false":
+      val = val.substr(0,1);
+      if ((val=="t")||(val=="1")) val = "true";
+      else if ((val=="f")||(val=="0")) val = "false";
+      else gnErr = 201;
+      break;
+    case "choice":
+    case "sequencing":
+      var a = val.split(",");
+      if (a.length > 1)
+      {
+        val = a[0];
+        for (i=1;i<a.length;i++) val += "[,]" + a[i];
+      }
+      break;
+    case "fill-in":
+    case "likert":
+        break;
+    case "matching":
+      var a = val.split(",");
+      for (i=0;i<a.length;i++)
+      {
+        b = a[i].split(".");
+        a[i] = b[0] + "[.]" + b[1];
+      }
+      val = a[0];
+      for (i=1;i<a.length;i++) val += "[,]" + a[i];
+      break;
+    case "numeric":
+        if (isNaN(parseFloat(val))) gnErr = 201; // tbd check err code
+        break;
+    case "performance":
+        // WAG
+      var a = val.split(",");
+      for (i=0;i<a.length;i++)
+      {
+        a[i] = "[.]" + a[i];
+      }
+      val = a[0];
+      for (i=1;i<a.length;i++) val += "[,]" + a[i];
+      break;
+    default:
+      gnErr = 301;
+  }
+  return val;
+}
+var gaInteractionTypes = new Array();
+
+function SetValueInteractions(what, val)
+{
+  // what = the full element name
+  // This function tries to keep track of the interaction
+  // type that is set for each interaction record,
+  // because it needs to know the type to fix up the data.
+  var r = "";
+  var sType = "";
+  var a = what.split(".");
+  // a[0]='cmi';a[1]='interactions';a[2]=n; etc.
+
+  var n = parseInt(a[2]);
+  if (!isPositiveInt(n)) return ScormSetValue(what,val);
+
+  switch(a[3])
+  {
+    case "type":
+      sType = val;
+      // here tbd add type value check
+      if (!IsInList(val, "true-false,choice,fill-in,matching,performance,sequencing,likert,numeric"))
+      {
+        gnErr = 201;
+        return "false"
+      }
+      gaInteractionTypes[n] = val; // This might need a throw/catch
+      r = ScormSetValue(what,val);
+      break;
+    case "student_response":
+      break;
+      val = FixLearnerResponsePattern(val, gaInteractionTypes[n]);
+      if (gnErr == 0) r = ScormSetValue(what,val);
+      else return "false";
+      break;
+    case "correct_responses":
+        if ((!isPositiveInt(a[4])) || (a[5] != "pattern"))
+        {
+                gnErr = 201;
+                return "false";
+        }
+      val = FixCorrectResponsePattern(val, gaInteractionTypes[n]);
+      if (gnErr == 0) r = ScormSetValue(what,val);
+      else return "false";
+      break;
+    case "latency":
+      r = ScormSetValue("cmi.interactions." + n + ".latency",FixDuration(val));
+      break;
+    case "result":
+        if (val == "wrong") val="incorrect";
+      r = ScormSetValue("cmi.interactions." + n + ".result",(val));
+      break;
+    case "time":
+      r = ScormSetValue("cmi.interactions." + n + ".timestamp",FixTimeStamp(val));
+      break;
+    case "weighting":
+        // nothing special
+      r = ScormSetValue("cmi.interactions." + n + ".weighting",(val));
+      break;
+    default:
+      r = ScormSetValue(what,val);
+  }
+  return r
+}
+
+function GetValueInteractions(what)
+{
+  // what = the full element name
+  // This function only returns _count and _children values
+  // because in SCORM 1.2 interaction data is write-only.
+  if ((what == "cmi.interactions._count")||(what =="cmi.interactions._children"))
+  {
+     return ScormGetValue(what);
+  }
+  gnErr = 404; // write only
+  return "";
+}
+
+// ======== Objectives remapping ==============
+
+function Objective(id) // Constructor for a new objective record
+{
+  this.id = id;
+  this.description = "";
+  this.score = new Score();
+  this.success_status = "unknown";
+  this.completion_status = "unknown";
+  this.progress_measure = "";
+  this.obj2004Index = null; // Used for mapping
+  return this;
+}
+
+// Support remapping of objectives array
+
+gaObjectives12 = new Array(); // Array of indices into gaObjectives2004
+gaObjectives2004 = new Array(); // Array of IDs
+
+function GetPresetIdsObjectives2004()
+  {
+    // Must be called automatically by this adapter
+    // just after initializing the session with the IEEE API.
+    // Assumes that the API implementation is bug-free
+    var n = ScormGetValue("cmi.objectives._count");
+    var s = null;
+    for (var i=0;i<n;i++)
+    {
+      s = "cmi.objectives." + i + ".";
+      gaObjectives2004[i] = ScormGetValue(s + "id");
+      // we are not reading anything else; this will be one-way
+      // only since a SCORM 1.2 SCO can only read objectives it has set.
+    }
+  }
+
+function Get2004IndexForNewObjective(id)
+{
+   // Get index of a SCO objective in the 2004 array
+   var n = -1;
+  for (var i=0;i<gaObjectives2004.length;i++)
+  {
+    if (this.gaObjectives2004[i] == id) return i;
+  }
+  return gaObjectives2004.length;
+}
+
+
+function SetObjectiveID(iSco,id)
+{
+  var n = -1;
+  for (var i=0;i<gaObjectives2004.length;i++)
+  {
+    if (this.gaObjectives2004[i] == id) n = i;
+  }
+  if (n == -1) n = gaObjectives2004.length;
+  var r = ScormSetValue("cmi.objectives." + n + ".id", id);
+  if (r == "true")
+  {
+    gaObjectives2004[n] = id;
+    gaObjectives12[iSco] = n;
+  }
+  return r;
+}
+
+function RemapObjectiveIndex(iSco)
+{
+   // Get index of a SCO objective in the 2004 array
+  return gaObjectives12[iSco];
+}
+
+function SetValueObjectives(what, val)
+{
+  // what = the full element name
+  // Assumes that this SCO passed test suite for 1.2
+  var gnErr = 0;
+  var a = what.split(".");
+
+  // a[0]='cmi';a[1]='objectives';a[2]=n; etc.
+
+  var n = parseInt(a[2]);
+  if (!isPositiveInt(n))
+  {
+    gnErr = 405;
+    return "false"; //will be error
+  }
+  // First remap to SCORM 2004 objective array
+
+  if (a[3] == "id")
+  {
+    if (n > gaObjectives12.length) // out of range
+    {
+      gnErr = 201;
+      return "false";
+    }
+    r = SetObjectiveID(n, val);
+    if (r != "true")
+    {
+      gnErr = 201;
+    }
+    return r;
+  }
+  else
+  {
+    if (n > gaObjectives12.length -1) // out of range
+    {
+      gnErr = 201;
+      return "false";
+    }
+    n = RemapObjectiveIndex(n);
+    if (!isPositiveInt(n))
+    {
+      gnErr = 201;
+      return "false";
+    }
+  }
+
+  if (a[3] == "score")
+  {
+    gaObjScores[n] = new Score();
+    ScoreMagic(gaObjScores[n], a[4], val);
+    if ((a[4] == "raw") && (gaObjScores[n].scaled != ""))
+    {
+      ScormSetValue("cmi.objectives." + n + ".score.scaled", gaObjScores[n].scaled);
+    }
+    return ScormSetValue(what, val);
+  }
+  else if (a[3] == "status")
+  {
+    if ((val == "completed")||(val="incomplete")||(val="not attempted"))
+    {
+        if (val == "completed") ScormSetValue("cmi.objectives." + n + ".progress_measure","1");
+      return ScormSetValue("cmi.objectives." + n + ".completion_status", val);
+    }
+    else if ((val == "passed")||(val="failed"))
+    {
+      return ScormSetValue("cmi.objectives." + n + ".success_status", val);
+    }
+    else if (val == "browsed")
+    {
+      // Ignore -- Best translation is to leave any existing value alone
+      return "true"; // Ignore but no error.
+    }
+  }
+  return ScormSetValue(what, val)
+}
+
+function GetValueObjectives(what)
+{
+  // There is a risk in reading back objective data from the host
+  // RTE because in SCORM 1.2 it does not persist from session
+  // to session. Also, because of objective mapping in SCORM 2004,
+  // unexpected objectives might be present and this could break
+  // SCOs that assume that they "own" the entire objective array.
+
+  // what = the full element name
+  var nErr = 0;
+  var r = "";
+  var s = "";
+  var a = what.split(".");
+  if (a[2] == "_count")
+  {
+    return (gaObjectives12.length + "");
+  }
+  if (a[2] == "_children") return "_count,id,status,score";
+  var n = parseInt(a[2]);
+  if (!isPositiveInt(n))
+  {
+    gnErr = 405;
+    return r;
+  }
+  if (n > gaObjectives12.length -1) // out of range
+  {
+    gnErr = 201;
+    return "";
+  }
+  n = RemapObjectiveIndex(n);
+  if (!isPositiveInt(n))
+  {
+    gnErr = 201;
+    return "";
+  }
+  switch(a[3])
+  {
+    case "id":
+        r = ScormGetValue(what);
+        break;
+    case "status":
+        // synthesize from detail data
+        s = ScormGetValue("cmi.objectives." + n + ".success_status");
+        if ((s=="passed"||s=="failed")) r = s;
+        else
+        {
+           s = ScormGetValue("cmi.objectives." + n + ".completion_status");
+           if ((s=="completed")||(s=="incomplete")||(s=="not attempted")) r = s;
+           else r == "not attempted";
+        }
+      break;
+    case "score":
+        if (IsInList(a[4],"min,max,raw,_children"))
+        {
+        r = GetValueScore(gaObjScores[n], a[4])
+        }
+        else gnErr = 201;
+      break;
+    default:
+      gnErr = 201;
+  }
+  return r
+}
+
+
+function SetValueLearnerPrefItem(what,val)
+{
+  var r = "false";
+  switch(what)
+  {
+    case "text":
+      r = ScormSetValue("cmi.learner_preference.audio_captioning",val);
+      break;
+    case "audio": // TBD now crude placeholder
+      var n = parseFloat(val);
+      if (isNaN(n)) val = "1";
+      else if (n == 0) val = "1";
+      else if (n == -100) val = "0";
+      else switch(true)
+      {
+        case (n <= -50): val = "0.5";break;
+        case (n <= -25): val = "0.8";break;
+        case (n <= 25): val = "2";break;
+        case (n <= 50): val = "4";break;
+        default: val = "8"
+      }
+      r = ScormSetValue("cmi.learner_preference.audio_level",val);
+      break;
+    case "language":
+      r = ScormSetValue("cmi.learner_preference.language",val);
+      break;
+    case "speed": // TBD now crude placeholder
+      var n = parseFloat(val);
+      if (isNaN(n)) val = "1";
+      else if (n == 0) val = "1";
+      else if (n == -100) val = "0";
+      else switch(true)
+      {
+        case (n <= -50): val = "0.5";break;
+        case (n <= -25): val = "0.8";break;
+        case (n <= 25): val = "2";break;
+        case (n <= 50): val = "4";break;
+        default: val = "8"
+      }
+      r = ScormSetValue("cmi.learner_preference.delivery_speed",val);
+      break;
+    default:
+      r = ScormSetValue("cmi.learner_preference." + what,val);
+      break;
+  }
+  return r;
+}
+
+function GetValueLearnerPrefItem(what)
+{
+  var r = "";
+  switch(what)
+  {
+    case "_children":
+      r = ScormGetValue("cmi.learner_preference._children");
+      break;
+    case "text":
+      r = ScormGetValue("cmi.learner_preference.audio_captioning");
+      break;
+    case "audio":  // TBD now crude placeholder
+      r = ScormGetValue("cmi.learner_preference.audio_level");
+      // Need to convert from IEEE to 1..100 scale with 0.0 -> -1 and 0 if empty
+      var n = parseFloat(r);
+      if (isNaN(n)) r = "0";
+      else if (n == 0) r = "-1";
+      else if (n == 1) r = "0";
+      else switch(true)
+      {
+        case (n < 0.5): r = "-50";break;
+        case (n < 1): r = "-25";break;
+        case (n < 2): r = "25";break;
+        case (n < 4): r = "50";break;
+        default: r = "100"
+      }
+      break;
+    case "language":
+      r = ScormGetValue("cmi.learner_preference.language");
+      break;
+    case "speed":  // TBD now crude placeholder
+      //   -100 is the slowest pace available in the system
+      // 0 is no-change status (The SCO uses its defaults.  SCO moves at its normal speed)
+      // 100 is maximum pace available in the system.
+      r = ScormGetValue("cmi.learner_preference.delivery_speed");
+      if (isNaN(n)) r = "0";
+      else if (n == 0) r = "-1";
+      else if (n == 1) r = "0";
+      else switch(true)
+      {
+        case (n < 0.5): r = "-50";break;
+        case (n < 1): r = "-25";break;
+        case (n < 2): r = "25";break;
+        case (n < 4): r = "50";break;
+        default: r = "100"
+      }
+      break;
+    default:
+      r = ScormGetValue("cmi.learner_preference." + what);
+      break;
+  }
+  return r;
+}
+
+function GetValueStudentDataItem(what)
+{
+  var r = "";
+  switch(what)
+  {
+    case "_children":
+      r = "mastery_score,max_time_allowed,time_limit_action";
+      break;
+    case "mastery_score":
+      var n = parseFloat(ScormGetValue("cmi.scaled_passing_score"));
+      if (isNaN(n)) n = 1;
+      r = RawPassingScoreFromScaled(n);
+      break;
+    case "max_time_allowed":
+        r = ScormGetValue("cmi.max_time_allowed")
+      r = centisecsToSCORM12Duration(ISODurationToCentisec(r));
+      break;
+    case "time_limit_action":
+      r = ScormGetValue("cmi.time_limit_action");
+      break;
+  }
+  return r + "";
+}
+
+function TranslateSCORM2004ErrorCodeTo12(n)
+{
+  if (isNaN(n)) n = parseInt(n);
+  if (isNaN(n)) return "Unrecognized error value";
+
+        switch(n)
+        {
+                case 0:
+                case 201:
+                        break;
+                case 102:
+                case 112:
+                case 122:
+                case 132:
+                case 142:
+                        n = 301;
+                        break;
+                case 402: n = 401; break;
+                case 404: n = 403; break;
+                case 405: n = 404; break;
+                case 406: n = 406; break;
+                case 407: n = 201; break
+                default: n = 101;
+        }
+  return n
+}
+
+function GetSCORM12ErrorString(parm)
+{
+  // Synthesize SCORM 1.2 Error strings
+
+        var n = parseInt(parm + "");
+        if (!isPositiveInt(n)) n = 101;
+
+  switch(n)
+  {
+    case 0: r = "No error"; break;
+    case 101: r = "General exception"; break;
+    case 201: r = "Invalid argument error"; break;
+    case 202: r = "Element cannot have children"; break;
+    case 203: r = "Element not an array - cannot have count"; break;
+    case 301: r = "Not initialized"; break;
+    case 401: r = "Not implemented error"; break;
+    case 402: r = "Invalid set value, element is a keyword"; break;
+    case 403: r = "Element is read only"; break;
+    case 404: r = "Element is write only"; break;
+    case 405: r =  "Incorrect Data Type"; break;
+    default: r = "Unrecognized SCORM 1.2 error code";
+  }
+  //alert("GetSCORM12ErrorString for " + n + " " + r)
+  return r;
+}
+
+// ========= API INSTANCE ===========
+
+function SCORM12APIInstance()
+{
+  // LMSInitialize and LMSTerminate are
+  // simulated by the wrapper, since the
+  // wrapper manages the session with the SCO.
+
+  this.LMSInitialize = function(parm)
+  {
+    //alert("LMSInitialize called\ngnSCOtoWrapperCommSessionState="
+    // + gnSCOtoWrapperCommSessionState);
+    gbInScoLaunch = false;
+    gnErr = 0;
+    if (parm != "")
+    {
+      gnErr = 201; // Invalid param
+      return "false";
+    }
+    else if (gnSCOtoWrapperCommSessionState == 0)
+    {
+      r = "true";
+      gnSCOtoWrapperCommSessionState = 1;
+      return "true";
+    }
+    //alert ("detected LMSInitialize problem")
+    gnErr = 101;
+    return "false";
+  }
+
+  this.LMSFinish = function(parm)
+  {
+    if (parm != "")
+    {
+      gnErr = 201;
+      return "false";
+    }
+    if (VerifySCOtoWrapperCommSessionState())
+    {
+      ScormCommit("");
+      if (ScormTerminate())
+      {
+        gnSCOtoWrapperCommSessionState = 2;
+        gnErr = 0;
+        return "true";
+      }
+    }
+    return "false";
+  }
+
+  // Commit is a straight passthrough
+
+  this.LMSCommit = function(parm)
+  {
+    if (parm != "")
+    {
+      gnErr = 201;
+      return "false";
+    }
+    if (!VerifySCOtoWrapperCommSessionState())
+    {
+      return "false";
+    }
+    gnErr = 0;
+    return ScormCommit(parm);
+  }
+
+  this.LMSSetValue = function(what, val)
+  {
+    if ((what == null) || (val == null))
+    {
+      gnErr = 201;
+      return "false";
+    }
+    if (!VerifySCOtoWrapperCommSessionState())
+    {
+        //alert("SetValue but no comm session")
+      return "false";
+    }
+    gnErr = 0;
+    var r = "false";
+    var a = what.split(".");
+    switch (a[0])
+    {
+      case "cmi":
+        switch(a[1])
+        {
+          case "comments":
+            r = ScormSetValue("cmi.comments_from_learner.0.comment",val);
+            if (r == "true") ScormSetValue("cmi.comments_from_learner.0.timestamp", MakeISOtimeStamp());
+            break;
+          case "core":
+            switch (a[2])
+            {
+              case "_children":
+              case "credit":
+              case "entry":
+              case "total_time":
+                gnErr = 403;
+                break;
+              case "exit":
+                r = ScormSetValue("cmi.exit",val);
+                break;
+              case "lesson_location":
+                r = ScormSetValue("cmi.location",val);
+                break;
+              case "lesson_status":
+                if ((val=="completed")||(val=="incomplete")||(val=="not attempted"))
+                {
+                        if (val=="completed") ScormSetValue("cmi.progress_measure", "1");
+                  r = ScormSetValue("cmi.completion_status", val);
+                }
+                else if ((val=="passed")||(val=="failed"))
+                {
+                  ScormSetValue("cmi.completion_status","completed")
+                  r = ScormSetValue("cmi.success_status", val);
+                }
+                else if (val=="browsed")
+                {
+                  // Ignore -- Best translation is to leave any 
+                  // existing value alone
+                  r = "true"; // Ignore but no error
+                }
+                else
+                {
+                  gnErr = 201;
+                }
+                 break;
+              case "score":
+                  //Here some smart conversion to try to scale the score
+                ScoreMagic(gaSCOScore,a[3], val)
+                if ((a[3]=="raw") && (gaSCOScore.scaled!=""))
+                {
+                  ScormSetValue("cmi.score.scaled", gaSCOScore.scaled);
+                }
+                r = ScormSetValue("cmi.score." + a[3],val);
+                break;
+              case "session_time":
+                  //Convert to ISO
+                r = ScormSetValue("cmi.session_time",FixDuration(val));
+                break;
+              default:
+                gnErr = 201;
+            }
+            break;
+          case "interactions":
+            r = SetValueInteractions(what,val);
+            break;
+          case "objectives":
+            r = SetValueObjectives(what,val);
+            break;
+          case "student_data":
+            gnErr = 403;
+            break;
+          case "student_preference":
+            r = SetValueLearnerPrefItem(n,val);
+            break;
+          default:
+            r = ScormSetValue(what, val);
+            break;
+          }
+          break;
+        case "suspend_data":
+          if ((val.length > 4000) && (gbDebugSession))
+          {
+            alert("Suspend data longer than 4000 characters.")
+          }
+          r = ScormSetValue(what, val);
+          break;
+        default:
+          r = ScormSetValue(what, val);
+    }
+    if ((gnErr != 0) && (gbDebugSession))
+    {
+      alert('Error ' + gnError + ' in LMSSetValue:\n' + what + '\nvalue="'+ val + '"');
+    }
+    //alert ("done setvalue - gnErr=" + gnErr + "\nGetLastError=" + this.LMSGetLastError())
+    return r + "";
+  }
+
+  this.LMSGetValue = function(what)
+  {
+    if (what == null)
+    {
+      gnErr = 201;
+      return "false";
+    }
+    if (!VerifySCOtoWrapperCommSessionState())
+    {
+      return "false";
+    }
+     if (gbDebugSession) alert("Adapter LMSGetValue: " + what);
+    gnErr = 0;
+    var r = "";
+    var a = what.split(".")
+    switch (a[0])
+    {
+      case "cmi":
+        switch(a[1])
+        {
+          case "comments":
+            r = ScormGetValue("cmi.comments_from_learner.0.comment");
+            break;
+          case "comments_from_lms":
+            r = ScormGetValue("cmi.comments_from_lms.0.comment");
+            break;
+          case "core":
+            switch (a[2])
+            {
+              case "_children":
+                r = "credit,entry,exit,lesson_location,lesson_mode,lesson_status,"
+                  + "score,session_time,student_id,student_name,total_time";
+                break;
+              case "credit":
+                r = ScormGetValue("cmi.credit");
+                break;
+              case "entry":
+                r = ScormGetValue("cmi.entry");
+                if (r == "ab_initio") r="ab-initio";
+                break;
+              case "lesson_location":
+                r = ScormGetValue("cmi.location");
+                break;
+              case "lesson_mode":
+                r = ScormGetValue("cmi.mode");
+                break;
+              case "lesson_status":
+                var s_s = ScormGetValue("cmi.success_status");
+                if ((s_s == "passed") || (s_s == "failed"))  r = s_s;
+                else r = ScormGetValue("cmi.completion_status");
+                if ((r == "") || (r == "unknown")) r = "not attempted";
+                break;
+              case "score":
+                if (IsInList(a[3],"min,max,raw")) r = GetValueScore(gaSCOScore,a[3]);
+                else gnErr = 201;
+                break;
+              case "student_id":
+                r = ScormGetValue("cmi.learner_id");
+                break;
+              case "student_name":
+                r = ScormGetValue("cmi.learner_name");
+                break;
+              case "total_time":
+                r = centisecsToSCORM12Duration(ISODurationToCentisec(ScormGetValue("cmi.total_time")));
+                break;
+              default:
+                gnErr = 201;
+                break;
+            }
+            break;
+          case "interactions":
+            r = GetValueInteractions(what)
+            break;
+          case "objectives":
+            r = GetValueObjectives(what)
+            break;
+          case "student_data":
+            r = GetValueStudentDataItem(a[2]);
+            break;
+          case "student_preference":
+            r = GetValueLearnerPrefItem(a[2]);
+            break;
+          default:
+            r = ScormGetValue(what);
+      }
+    }
+    if ((gnErr != 0) && (gbDebugSession))
+    {
+      alert('Error ' + gnError + ' in LMSGetValue:\n' + what);
+    }
+    return r + "";
+  }
+
+  this.LMSGetLastError = function()
+  {
+    var r = 0;
+    if (gnErr != 0)
+    {
+      r = gnErr;
+    }
+    else if (ScormIsInSession())
+    {
+      var r = TranslateSCORM2004ErrorCodeTo12(parseInt(ScormGetLastError()));
+      gnErr = r;
+    }
+    //alert("LMSGetLastError=" + r); // debug
+    return r + "";
+  }
+
+  this.LMSGetErrorString = function(parm)
+  {
+    var r = GetSCORM12ErrorString(parm);
+    if ((r=="")&&(ScormIsInSession()))
+    {
+      r = ScormGetErrorString(parm + "");
+    }
+    if (r=="") r = "Unrecognized error code";
+    return r + "";
+  }
+
+  this.LMSGetDiagnostic = function(parm)
+  {
+    var r = null;
+    if (ScormIsInSession())
+    {
+      r = ScormGetDiagnostic(parm);
+    }
+    r += "\n (SCORM 1.2 to 2004 conversion wrapper by Claude Ostyn"
+      + "\n  status of communication session with host RTE = "
+      + ScormIsInSession() + ")";
+    return r + "";
+  }
+
+} // end function APIInstance
+
+var API = new SCORM12APIInstance();
+
+// ========= END API INSTANCE ===========
+
+// ========= MANAGEMENT OF THE WRAPPED SCO =========
+
+function FileNameToUrl(url)
+{
+  var p = url.indexOf(":\\");
+  if (p < 0)
+  {
+    return url;
+  }
+  if (p == 2)
+  {
+    url = url.substr(1); // clear leading backslash
+  }
+  rExp = /\\/gi;
+  url = url.replace(rExp,"/");
+  return url;
+}
+
+function LocalPath()
+{
+  var s = window.location.href;
+  // URL parsing improvement suggested by Nick Webb
+  // for cases where the SCO url contains slash chars
+  var p = s.indexOf("?");
+  if (p > -1)
+  {
+    s = s.substr(0,p);
+  }
+  s = FileNameToUrl(s);
+  p = s.lastIndexOf("/");
+  s = s.substr(0,p+1);
+  return s;
+}
+
+function MassageURL(url)
+{
+  // Massage URL to get a fully qualified URL, even if this is
+  // launched in file system by offline player or test suite
+  url = FileNameToUrl(url); //
+  if ((url.indexOf("http:")!=0)&&(url.indexOf("https:")!=0)&&(url.indexOf("file:")!=0))
+  {
+    url = LocalPath() + url;
+  }
+  if ((url.indexOf("http:")!= 0)&&(url.indexOf("https:")!=0)&&(url.indexOf("file://")!=0))
+  {
+    url = "file:///" + url;
+  }
+  return url
+}
+
+function CleanupURLParameters(url)
+{
+  // Remove the parameters specific to this wrapper
+  // by reconstructing the parameter substring
+  // minus our own params
+
+  var b, s, i, j;
+  var parms = "";
+ // First unescape the # if one was encoded
+  var p = url.indexOf("%23");
+  if (p >= 0)
+  {
+    url = url.substr(0,p) + "#" + url.substr(p+3);
+  }
+  return url;
+}
+
+var gbSCOLoaded = false;
+
+function LoadSCO(url)
+{
+  url = MassageURL(url);
+  url = CleanupURLParameters(url);
+
+  //alert("URL=" + url);
+
+  // In Firefox, there is a problem with attempting to load
+  // the SCO as part of the thread that loads the wrapper itself.
+  // Simplest workaround is to wait 1/4 second.
+  // Problem does not occur in IE but may occur in others.
+  if ((navigator.appName).indexOf("Microsoft") >= 0)
+  {
+    SCOLoader(url);
+  }
+  else
+  {
+    self.setTimeout('SCOLoader("' + url + '")', 250);
+  }
+}
+
+function SCOLoader(url)
+{
+  gbInScoLaunch = true;
+  wndAdapter2004Stage.location = url;
+  gbSCOLoaded = true;
+  self.setTimeout('AssumeSCOLaunched()', 1000);
+}
+
+function UnloadSCO()
+{
+  wndAdapter2004Stage.location.href = "about:blank";
+  gbInScoLaunch = false;
+  gbSCOLoaded = false;
+}
+
+function AssumeSCOLaunched()
+{
+  gbInScoLaunch = false;
+}
+
+//alert("ok")
+
+// ========= INITIALIZATION =========
+
+function Help()
+{
+  alert(gs_HELP_TEXT);
+}
+
+function init()
+{
+  ScormInitialize();
+  var url = GetURLParam(gsPARAM_NAME_FOR_URL_OF_SCO);
+  if ((url != null) && (url != ""))
+  {
+    LoadSCO(url);
+  }
+  else
+  {
+    var doc = wndAdapter2004Stage.document;
+    doc.open();
+    doc.write(_doc());
+    doc.close();
+    alert(gsINVALID_PARAM_FOR_URL_OF_SCO + "\n("
+    + gsPARAM_NAME_FOR_URL_OF_SCO + ") in\n"
+    + window.location.href + "\n\n"
+    + gsEXPLAIN_DOC_SHOWN);
+  }
+}
+
+function _doc(){
+var s='<html><head><title>The Easy SCO Adapter for SCORM 1.2 to 2004 overview</title><style>* {font-family: Arial, Helvetica, Sans-Serif; font-size:0.9em;} a {font-size:100%} h2 {font-size:1.5em;} h3 {font-size: 1.25em;} h4 {font-size: 1em;} pre {font-family: "Courier New", Courier, Monospace;}<\/style></head><body><h2>Easy SCO Adapter for SCORM 1.2 to 2004<small><small><br />Run SCORM 1.2 SCOs in a SCORM 2004 LMS<\/small><\/small><\/h2><p>Claude Ostyn, Ostyn Consulting<br />Version ';
+s += gsVERSION;
+s += ' &nbsp;Copyright &copy; 2004,2005,2006 Ostyn Consulting - Some rights reserved' +
+'<\/p><h3>What is this?<\/h3><p>The Easy SCO Adapter for SCORM 1.2 to 2004 allows you to run any unmodified SCORM 1.2 conformant SCOs in a SCORM 2004 conformant LMS. It is most useful in situations where modifying or recreating SCOs is not economically feasible. When you use the adapter, the SCO believes that it is running in a SCORM 1.2 runtime environment, and the runtime environment believes that it is running a SCORM 2004 SCO. This is totally invisible to a user.<\/p><p>No special tool or knowledge of scripting is required to use this adapter. The adapter is a code "black box" and it is invisible to the user. It does not require that the SCO be coded or constructed in any particular way or use any particular script. As long as the SCO is truly SCORM 1.2 conformant, the adapter will handle it automatically.<\/p><h3>Documentation<\/h3>This html document must be launched in a SCORM 2004 runtime environment instead of the SCORM 1.2 SCO that it is adapting, with a "sco" parameter that specifies the SCORM 1.2 SCO to launch. For example:<\/p><p>Before<\/p><pre>&lt;resource ... href="sco1.htm"&gt;\n&nbsp;&nbsp;&lt;file href="sco1.htm"&gt;\n&nbsp;&nbsp;...\n&lt;resource&gt;<\/pre><p>After<\/p><pre>&lt;resource ... href="esas2004.htm?sco=sco1.htm"&gt;\n&nbsp;&nbsp;&lt;file href="esas2004.htm"&gt;\n&nbsp;&nbsp;&lt;file href="sco1.htm"&gt;\n&nbsp;&nbsp;...\n&lt;resource&gt;<\/pre><p>See <a href="http://www.ostyn.com/resources.htm">http://www.ostyn.com/resources.htm<\/a> for additional information and the most current version of this adapter.<h3>License<\/h3><h4>Terms of use<\/h4><p>This document and the software described in this document are copyrighted and may be used freely under the terms of the LGPL (Lesser General Public License, <a href="http://www.gnu.org/copyleft/lesser.html">http://www.gnu.org/copyleft/lesser.html<\/a>). If you cannot live with the terms of the LGPL, please contact Ostyn Consulting at <a href="http://www.ostyn.com/contact.htm">http://www.ostyn.com<\/a> for special licensing terms.<\/p><h4>No warranty<\/h4><p>Use at your own risk. The author and publisher of this document and of the described software shall not be responsible for any error, omission or any damage that may result from their use by you or anyone else. Publication of this document and of the described software does not imply a promise to update or maintain either of them in the future. By using this document or the software, you agree with these terms.<\/p><h3>Feedback<\/h3><p>Please report success stories and bugs to <a href="mailto:tools'+
+'@'+ 'ostyn.com">tools' + '@o' + 'styn.com<\/a><\/p></body></html>';
+//alert(s);
+return s;
+}
+
+//]]>
+</script>
+</head>
+
+<frameset rows="*,1" onload="init()">
+  <frame id="wndAdapter2004Stage" name="wndAdapter2004Stage" src="about:blank"
+  frameborder="0" noresize="true" scrolling="auto" />
+  <frame id="wndDummy" name="wndDummy" src="about:blank"
+  marginwidth="0" frameborder="0" noresize="true" scrolling="no" />
+</frameset>
+</html>

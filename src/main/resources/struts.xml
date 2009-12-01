@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!DOCTYPE struts PUBLIC 
+    "-//Apache Software Foundation//DTD Struts Configuration 2.0//EN"
+    "http://struts.apache.org/dtds/struts-2.0.dtd">
+
+<struts>
+  
+ 
+    
+  <package name="default" extends="struts-default">
+       
+   <action name="">
+      <result>/WEB-INF/jsp/index.jsp</result>
+    </action>    
+       
+    <action name="home">
+      <result>/WEB-INF/jsp/index.jsp</result>
+    </action>
+    
+    <action name="form">
+      <result>/WEB-INF/jsp/form.jsp</result>
+    </action>
+    
+    <action name="about">
+      <result>/WEB-INF/jsp/about.jsp</result>
+    </action>
+    
+ 	<action name="upload" class="com.k_int.transcoder.action.UploadFileAction">
+
+       <interceptor-ref name="fileUpload">
+         	<param name="allowedTypes">
+     			application/zip,application/x-zip, application/x-gzip, application/x-zip-compressed, application/octet-stream, application/x-compress, application/x-compressed, multipart/x-zip
+  			</param>
+  			<param name="maximumSize">
+     			100000000
+  			</param>
+       </interceptor-ref>
+       
+        <interceptor-ref name="basicStack"/>
+       
+       <interceptor-ref name="validation">
+      			<param name="excludeMethods">input,back,cancel,browse</param>
+   		</interceptor-ref>
+   		<interceptor-ref name="workflow">
+      		<param name="excludeMethods">input,back,cancel,browse</param>
+   		</interceptor-ref>	
+   		
+   	  
+     	<result name="success" type="redirectAction">
+	 	 	 <param name="actionName">acknowledgement/${uploadId}</param>
+	 	 </result>
+     	<result name="error">/WEB-INF/jsp/index.jsp</result>
+     	<result name="input">/WEB-INF/jsp/index.jsp</result>
+     	
+	</action>
+  
+  <action name="feedback" class="com.k_int.transcoder.form.Form">
+	 	<result name="success" type="redirectAction">
+	 	 	 <param name="actionName">acknowledgement</param>
+	 	 </result>
+     	<result name="error">/WEB-INF/jsp/form.jsp</result>
+     	<result name="input">/WEB-INF/jsp/form.jsp</result>
+  </action>
+  
+  <action name="acknowledgement/*" class="com.k_int.transcoder.action.AcknowledgementAction">
+	 	<param name="uploadId">{1}</param>
+	 	<result name="success">/WEB-INF/jsp/acknowledgement.jsp?people=${people}&amp;packages=${packages}&amp;feedback=${feedback}&amp;uploadId=${uploadId}</result>
+  </action>
+	
+  <action name="acknowledgement" class="com.k_int.transcoder.action.AcknowledgementAction">
+	 	<result name="success">/WEB-INF/jsp/acknowledgement.jsp?people=${people}&amp;packages=${packages}&amp;feedback=${feedback}</result>
+  </action>	
+	
+  <action name="download" class="com.k_int.transcoder.action.DownloadAction">
+	 <result name="error">/WEB-INF/jsp/downloadError.jsp</result>
+  </action>
+	
+	
+  </package>
+  
+
+</struts>

@@ -1,0 +1,1850 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Frameset//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-frameset.dtd">
+
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="\&quot;expires\&quot;" content=
+  "\&quot;0\&quot;" />
+  <meta http-equiv="Content-Type" content=
+  "text/html; charset=us-ascii" />
+  <meta name="generator" content="Claude" />
+  <meta name="version" content="0.9 beta" />
+  <meta name="copyright" content=
+  "Copyright (c) 2007 Ostyn Consulting -- All rights reserved" />
+  <meta name="description" content=
+  "Mini-RTE for SCORM 2004 SCOs. Supports most of the data model but error checking is not complete and some complex behaviors are not implemented. Specify the SCO to launch as a parameter named SCO (case insensitive) in the launch URL for this mini_RTE." />
+
+  <title>Claude's SCORM 2004 Single SCO Player</title>
+<script type="text/javascript">
+//<![CDATA[
+var gs_VERSION = "0.9 beta";
+// History
+// 0.9 first public release
+
+// ========= LOCALIZABLE STRINGS ===========
+
+var g_SCO_to_Launch = "";
+  // change g_SCO_to_Launch to a URL if you want to specify
+	// the SCO here rather than by using a parameter.
+
+// ========= LOCALIZABLE STRINGS ===========
+
+// misc alerts and messages
+var gs_ERR_LO_BROWSER = '"Sorry, this SCORM SCO player requires IE 5.5, '
+  + 'FireFox 1.5 or an equally capable DOM enabled browser.';
+var gs_ONE_MOMENT = "One moment, please...";
+
+// ========= Help string =======//
+var gs_HELP_TEXT = '<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'+
+ '<html><head><meta http-equiv="Content-Type" content= "text/html; charset=us-ascii">'+
+ '<meta name="generator" content="Claude">'+
+ '<title>SCORM 2004 Wrapper Help<\/title> <style type="text/css">'+
+ ' body {font-family: Arial, Helvetica, Sans-Serif;font-size:10pt}'+
+ ' .typeit {font-family: Courier, Courier New;}'+
+ ' .heavy {font-weight: bold;} <\/style>'+
+ '<\/head>'+
+ '<body>'+
+ ' <h3>SCORM 2004 single SCO player by Claude Ostyn '+
+ '<small><small>Version&nbsp;' + gs_VERSION + '<br />'+
+ '&copy; 2007 Claude Ostyn - All rights reserved '+
+ '&nbsp;<a href="#terms">License and terms of use<\/a><\/small><\/small><\/h3>'+
+ ' <p><span class="heavy">Synopsis<\/span><br/>'+
+ '<p><span class="heavy">How to use the player<\/span><br/> '+
+ 'You must launch the player as a web page in the file system or in a web site, '+
+ 'and specify a relative URL for the SCO to launch. The URL must be specified '+
+ 'in a parameter named "sco". The player does not '+
+ 'implement all the features of a real LMS, and in this version some of the '+
+ 'error state values may not be correct. However you can exercise most of the '+
+ 'functionality of a SCO, except data persistence and suspend or resume.<\/p>'+
+ '<p><span class="heavy">Feedback<\/span><br />'+
+ 'Feedback is highly appreciated so this tool can '+
+ 'get improved and to prove that it is worth making it available to the '+
+ 'SCORM community. How you use it, what problem it helped you solve, '+
+ 'problems or bugs you discovered, and so on. Please send your feedback '+
+ 'to <a href="mailto:tools@ostyn.com?Subject=scorm2004testwrap&nbsp;'+
+ gs_VERSION +
+ '">tools@ostyn.com<\/a>.<br />For the most current version of this utility, '+
+ 'see <a href="http://www.ostyn.com/resources.htm">http://www.ostyn.com/resources.htm<\/a><\/p>'+
+ '<p><a name="terms"><\/a><span class="heavy">License and terms of use<\/span><br /> '+
+ '<a rel="license" href="http://creativecommons.org/licenses/by-sa/2.5/"'+
+ ' target="_external">'+
+ '<img alt="Creative Commons License" border="0" '+
+ 'src="http://creativecommons.org/images/public/somerights20.png"/><\/a> '+
+ 'This work is licensed under a <a rel="license" '+
+ 'href="http://creativecommons.org/licenses/by-sa/2.5/" target="_external">'+
+ 'Creative Commons '+
+ 'Attribution-ShareAlike2.5 License<\/a>.<br />'+
+ 'USE AT YOUR OWN RISK<br />'+
+ 'THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR '+
+ 'IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, '+
+ 'FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE '+
+ 'AUTHOR OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER '+
+ 'LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, '+
+ 'OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE '+
+ 'SOFTWARE.<\/p>'+
+ ' <\/body> <\/html>';
+
+// ========= DEFAULT OPTIONS =========
+
+var gn_PassingScore = 0.80;
+var gn_CompletionThreshold = 1.0;
+
+// ========= MISCELLANEOUS DEFAULT VALUES ======== //
+var gs_DFLT_LEARNER_NAME = "Learner"
+var gs_Learner_Id = makePseudoGuid();
+    // makePseudoGuid() generates a random ID
+
+gRTEPresetBrowse = "browse";
+gRTEPresetCredit = "no_credit";
+
+var gbAutoSuccessStatus = false;
+
+// ========= GENERIC UTILITY FUNCTIONS =========
+
+function makePseudoGuid()
+{
+  return "123456-1223435-112334"
+}
+
+function trim(str)
+{
+  if (str == null) return "";
+  return str.replace(/^\s*(\b.*\b|)\s*$/, "$1");
+}
+
+function compareStr(sA,sB)
+{
+  if (sA > sB) return 1;
+  if (sA < sB) return -1;
+  return 0;
+}
+
+function IsUnsafeString(s)
+{
+  // True if any char < "!" that is not tab, CR or LF
+  var c;
+  for (var i=0;i<s.length;i++)
+  {
+    c = s.charCodeAt(i);
+    if ((c < 33)&&((c!=9)&&(c!=10)&&(c!=13))) return true;
+  }
+  return false;
+}
+
+function pseudoPrintf(s)
+{
+  // Replace placeholders in the form #1 #2 etc. in s with
+  // corresponding strings passed as extra arguments
+  // Note: number base is 1, not 0;
+  if (arguments.length < 2) return s;
+  var re = new RegExp("x1", "g");
+  for (var i=arguments.length-1;i>0;i--)
+  {
+    re.compile("#" + i,"g");
+    s = s.replace(re, arguments[i] + "");
+  }
+  return s;
+}
+
+function IsValidIeeeIdentifier(s)
+{
+  var OK = (!IsUnsafeString(s));
+  // Here other tests to be done
+  return OK;
+}
+
+function WriteWindowDocument(wnd, s)
+{
+  if (!wnd) return;
+  wnd.document.open();
+  wnd.document.write(s);
+  wnd.document.close();
+}
+
+//!!! Other globals and presets
+
+/*** Debug flag. If true, alerts are shown for some significant events ***/
+var gbDebugSession = false; // default should be false
+
+
+// Parse any parameters passed on command line
+
+var gaURLParams = new Array();
+
+function URLParams2Array()
+{
+  var s  = location.search;    // Strips query string from URL.
+
+  if (s.length > 0)
+  {
+    if (s.charAt(0) == "?") s = s.substr(1);
+    if (s.length > 0)
+    {
+      var aNamVals = s.split("&");
+      var aNamVal = null;
+      var v = "";
+      var Pattern1 = new RegExp(/\+/g);
+      for (var i=0;i<aNamVals.length;i++)
+      {
+        aNamVal = aNamVals[i].split("=");
+        v = aNamVal[1];
+        if ((v)&&(aNamVal[0].length>0))
+        {
+          v = v.replace(Pattern1, " ");
+          gaURLParams[gaURLParams.length] =
+            new Array(aNamVal[0].toUpperCase(),unescape(v));
+        }
+      }
+    }
+  }
+}
+
+URLParams2Array();
+
+// Special processing for the SCO parameter. If the SCO parameter
+// contains a ? then everything past that ? is considered to be
+// part of the SCO parameter.
+// This allows use of a complex SCO parameter without requiring
+// it to be fully URL encoded, as long as the SCO parameter is the
+// last one in the URL parameters.
+
+function ReprocessSCOParam()
+{
+  // We can skip some error trapping since we already know
+  // that there are params and that one of them is SCO.
+  var s = location.search;
+  if (s.charAt(0) == "?") s = s.substr(1);
+  var a = s.split("?");
+  var sFullUrl = GetURLParam("SCO");
+  if ((sFullUrl == "") || (a.length < 2)) return; // nothing to find
+  // Doublecheck
+  var p = s.toUpperCase().indexOf("SCO=");
+  if (p >= s.indexOf("?")) return; // too complicated; give up
+  // Reprocess, but stop at the SCO parameter
+  gaURLParams = new Array();
+  // Parameter order doesn't matter, so we can record the SCO param first
+  gaURLParams[0] = new Array("SCO",s.substr(p+4));
+  s = s.substr(0,p); // now we can process the other params
+  if (s.length > 0)
+  {
+    var aNamVals = s.split("&");
+    var aNamVal = null;
+    var v = "";
+    var Pattern1 = new RegExp(/\+/g);
+    for (var i=0;i<aNamVals.length;i++)
+    {
+      aNamVal = aNamVals[i].split("=");
+      v = aNamVal[1];
+      if ((v)&&(aNamVal[0].length>0))
+      {
+        v = v.replace(Pattern1, " ");
+        gaURLParams[gaURLParams.length] =
+          new Array(aNamVal[0].toUpperCase(),unescape(v));
+      }
+    }
+  }
+}
+
+if (true) // Change to false only if this is really problematic
+{
+	// If SCO param is found, reprocess so that its search string, if any,
+	// is included in the parameter value
+  if (GetURLParam("SCO") != "") ReprocessSCOParam();
+}
+
+function GetURLParam(nam) {
+  nam=nam.toUpperCase();
+  for (i=0;i<gaURLParams.length;i++){
+    if (gaURLParams[i][0]==nam){
+      return gaURLParams[i][1]
+    }
+  }
+  return ""
+}
+
+if (GetURLParam("DEBUG").toUpperCase().indexOf("Y") == 0) gbDebugSession == true;
+
+/*** General session info helper functions ***/
+
+function PassThroughOK() // Returns true if not managing but passing through to another API
+{
+	return false;
+}
+
+function ScormIsInSession() // Returns true if managed session is in session
+{
+ 	// Returns true if SetValue and GetValue are allowed
+  return ((_gnScormSessionState == 2) || (_gnScormSessionState == 3));
+}
+
+function ScormGetSessionState()
+{
+  return _gnScormSessionState;
+}
+
+
+// ========= TIME AND DURATION FUNCTIONS ========
+// Helper functions for duration
+function centisecsToISODuration(n) {
+    // Note: SCORM and IEEE 1484.11.1 require centisec precision
+    // Months calculated by approximation based on average number
+  // of days over 4 years (365*4+1), not counting the extra day
+  // every 1000 years. If a reference date was available,
+  // the calculation could be more precise, but becomes complex,
+    // since the exact result depends on where the reference date
+    // falls within the period (e.g. beginning, end or ???)
+  // 1 year ~ (365*4+1)/4*60*60*24*100 = 3155760000 centiseconds
+  // 1 month ~ (365*4+1)/48*60*60*24*100 = 262980000 centiseconds
+  // 1 day = 8640000 centiseconds
+  // 1 hour = 360000 centiseconds
+  // 1 minute = 6000 centiseconds
+    n = Math.round(Math.max(n,0)); // there is no such thing as a negative duration
+    var str = "P";
+    var nCs = n;
+    // Next set of operations uses whole seconds
+    var nY = Math.floor(nCs / 3155760000);
+    nCs -= nY * 3155760000;
+    var nM = Math.floor(nCs / 262980000);
+    nCs -= nM * 262980000;
+    var nD = Math.floor(nCs / 8640000);
+    nCs -= nD * 8640000;
+    var nH = Math.floor(nCs / 360000);
+    nCs -= nH * 360000;
+    var nMin = Math.floor(nCs /6000);
+    nCs -= nMin * 6000
+    // Now we can construct string
+    if (nY > 0) str += nY + "Y";
+    if (nM > 0) str += nM + "M";
+    if (nD > 0) str += nD + "D";
+    if ((nH > 0) || (nMin > 0) || (nCs > 0)) {
+        str += "T";
+        if (nH > 0) str += nH + "H";
+        if (nMin > 0) str += nMin + "M";
+    if (nCs > 0) str += (nCs / 100) + "S";
+    }
+    if (str == "P") str = "PT0H0M0S";
+      // technically PT0S should do but SCORM test suite assumes longer form.
+    return str;
+}
+
+function ISODurationToCentisec(str) {
+    // Only gross syntax check is performed here
+    // Months calculated by approximation based on average number
+  // of days over 4 years (365*4+1), not counting the extra day
+  // every 1000 years. If a reference date was available,
+  // the calculation could be more precise, but becomes complex,
+    // since the exact result depends on where the reference date
+    // falls within the period (e.g. beginning, end or ???)
+  // 1 year ~ (365*4+1)/4*60*60*24*100 = 3155760000 centiseconds
+  // 1 month ~ (365*4+1)/48*60*60*24*100 = 262980000 centiseconds
+  // 1 day = 8640000 centiseconds
+  // 1 hour = 360000 centiseconds
+  // 1 minute = 6000 centiseconds
+    var aV = new Array(0,0,0,0,0,0);
+    var bErr = false;
+    var bTFound = false;
+    if (str.indexOf("P") != 0) bErr = true;
+    if (!bErr){
+        var aT = new Array("Y","M","D","H","M","S")
+        var p=0;
+        var i = 0;
+        str = str.substr(1); //get past the P
+        for (i = 0 ; i < aT.length; i++){
+            if (str.indexOf("T") == 0){
+                str = str.substr(1);
+                i = Math.max(i,3);
+        bTFound = true;
+            }
+            p = str.indexOf(aT[i]);
+            //alert("Checking for " + aT[i] + "\nstr = " + str);
+            if (p > -1){
+                // Is this a M before or after T?
+                if ((i == 1) && (str.indexOf("T") > -1) && (str.indexOf("T") < p)) continue;
+                if (aT[i] == "S"){
+                    aV[i] = parseFloat(str.substr(0,p))
+                } else {
+                    aV[i] = parseInt(str.substr(0,p))
+                }
+                if (isNaN(aV[i])){
+                    bErr = true;
+                    break;
+                } else if ((i > 2) && (!bTFound)){
+                    bErr = true;
+                    break;
+        }
+                str = str.substr(p+1);
+            }
+        }
+        if ((!bErr) && (str.length != 0)) bErr = true;
+        //alert(aV.toString())
+    }
+    if (bErr){
+        //alert("Bad format: " + str)
+        gnErr = 406; // TBD get correct error number here
+        return 0
+    }
+    return aV[0]*3155760000 + aV[1]*262980000
+      + aV[2]*8640000 + aV[3]*360000 + aV[4]*6000
+      + Math.round(aV[5]*100)
+}
+
+
+// ========= PSEUDO RTE ===========
+
+// Housekeeping
+var gbInScoLaunch = false;
+
+var gnErr = 0;
+
+var gbSuspended = false;
+
+// Comm session state management
+var gnRTECommState = 0;
+  // 0 = not initialized; 1 = initialized; 3 = terminated
+
+var gnSessionTime = 0; // current session time
+
+function Score() // Constructor for a new score
+{
+  this.scaled = "";
+  this.raw = "";
+  this.min = "";
+  this.max = "";
+}
+
+var gaScore = new Score();
+var gaNamedValues = new Array();
+var gaInteractions = new Array();
+var gaObjectives = new Array();
+var gaCommentsFromLearner = new Array();
+var gaCommentsFromLms = new Array();
+var gbSuspended = false;
+var gbResume = false;
+var gnTotalAttemptTime = 0; // centiseconds
+var gsPrimarySuccessStatus = "unknown";
+var gsPrimaryCompletionStatus = "not attempted"
+
+
+// These are not reinitialized on reset attempt
+var gLearnPrefAudioCaptioning = "0";
+var gLearnPrefAudioLevel = "1";
+var gLearnPrefDeliverySpeed = "1";
+var gLearnPrefLanguage = "fr-BE";
+
+var gSuspendData = "";
+var gSuspendLocation = "";
+
+function ResetSession()
+{
+  gnErr = 0;
+  gnRTECommState = 0;
+
+  if (gbSuspended)
+  {
+    gbResume = true; // value of cmi.entry will be "resume"
+    gnSessionTime = 0;
+  }
+  else
+  {
+    ResetAttempt();
+  }
+}
+
+function ResetAttempt()
+{
+  gnErr = 0;
+  gnRTECommState = 0;
+  gaScore = new Score();
+  gaNamedValues = new Array();
+  gaInteractions = new Array();
+  gaObjectives = new Array();
+  gaCommentsFromLearner = new Array();
+  gbSuspended = false;
+  gbResume = false;
+  gnTotalAttemptTime = 0;
+  gSuspendData = "";
+  gSuspendLocation = "";
+  gsPrimarySuccessStatus = "unknown";
+  gsPrimaryCompletionStatus = "not attempted";
+}
+
+function UpdateTotalTimeAtEndOfSession()
+{
+}
+
+
+function NamedValue(nam,val) // Constructor for a name-value pair
+{
+  this.nam = nam;
+  this.val = val
+}
+
+function SetValueByName(nam,val)
+{
+  var n = -1;
+  for (i=0;i<gaNamedValues.length;i++)  if (gaNamedValues[i].nam == nam) n = i;
+  if (n == -1) gaNamedValues[gaNamedValues.length] = new NamedValue(nam,val);
+  else gaNamedValues[n].val = val;
+   return 0;
+}
+
+function GetValueByName(nam)
+{
+  var n = -1;
+  for (i=0;i<gaNamedValues.length;i++)  if (gaNamedValues[i].nam == nam) n = i;
+  if (n == -1) return null;
+  else return gaNamedValues[n].val;
+}
+
+function StripLeadingDots(s, n)
+{
+  var p = 0;
+  // strip n dotted elements in dot notation
+  var a = s.split(".");
+  for (i = 0; i< n; i++) p += a[i].length + 1;
+  return s.substr(p);
+}
+
+
+function SetValueScore(aScore, what, val)
+{
+  var n = parseFloat(val);
+  if (isNaN(n)) return 406;
+  switch(what)
+  {
+    case "scaled":
+      if ((n < -1.0) || (n > 1.0)) return 407;
+      aScore.scaled = n;
+      break;
+    case "raw":
+      aScore.raw = n;
+      break;
+    case "min":
+      aScore.min = n;
+      break;
+    case "max":
+      aScore.max = n;
+      break;
+    default:
+      return 401;
+  }
+  return 0
+}
+
+function GetValueScore(aScore, what)
+{
+  var r = "";
+  var nErr = 0;
+  switch(what)
+  {
+  	case "_children":
+  		r = "scaled,raw,min,max";
+  		break;
+    case "scaled":
+      r = aScore.scaled;
+      break;
+    case "raw":
+      r = aScore.raw;
+      break;
+    case "min":
+      r = aScore.min;
+      break;
+    case "max":
+      r = aScore.max;
+      break;
+    default:
+      gnErr = 351;
+  }
+  return r + "";
+}
+
+
+function Interaction(id) // Constructor for a new interaction record
+{
+  this.id = id;
+  this.type= null;
+  this.description = "";
+  this.latency = "";
+  this.timestamp = "";
+  this.result = "";
+  this.weigthing = "";
+  this.correctResponses = new Array();
+  this.learnerResponse = "";
+  this.objectives = new Array();
+}
+
+function isValidInteractionType(s)
+{
+  var a = new Array("true-false","choice","fill-in",
+     "long-fill-in","likert","matching","performance","sequencing","numeric","other")
+  for (i=0;i<a.length;i++)
+  {
+    if (s == a[i]) return true
+  }
+  return false;
+}
+
+function isPositiveInt(n)
+{
+  return ((!isNaN(n)) && (Math.round(n) == n) && (n >= 0))
+}
+
+function SetCorrectResponses(nInteraction, n2, nam, val)
+{
+  //alert("Set CorrectResponses\n" + nInteraction + "\n" + n2 + "\n" + nam + "\n" + val)
+  var nErr = 0;
+  var typ = gaInteractions[nInteraction].type;
+  if (typ == null) return 301; // tbd
+  var i = parseInt(n2);
+  if (!isPositiveInt(i)) return 351; // tbd
+  if (nam != "pattern") return 351; // tbd
+  if ((i > 0) && ((typ == "true-false") || (typ == likert))) return 351;
+  if (i > gaInteractions[nInteraction].correctResponses.length) return 351;
+  gaInteractions[nInteraction].correctResponses[i] = val.toString();
+  return 0;
+}
+
+function GetCorrectResponses(nInteraction, n2, nam)
+{
+  //alert("Get CorrectResponses\n" + nInteraction + "\n" + n2 + "\n" + nam)
+  var nErr = 0;
+  var r = "";
+  var typ = gaInteractions[nInteraction].type;
+  if (typ == null) nErr = 301; // tbd
+  else
+  {
+    var i = parseInt(n2);
+    if (!isPositiveInt(i)) nErr = 351; // tbd
+    else if (nam != "pattern") nErr = 351; // tbd
+    else if ((i > 0) && ((typ == "true-false") || (typ == likert))) nErr = 351;
+    else if (i > gaInteractions[nInteraction].correctResponses.length - 1) nErr = 351;
+    else r = gaInteractions[nInteraction].correctResponses[i].toString();
+  }
+  if (nErr != 0) gnErr = nErr;
+  return r
+}
+
+function SetValueInteractions(what, val)
+{
+  // what = the part of the element name after "interactions."
+  var nErr = 0;
+  var a = what.split(".");
+  var n = parseInt(a[0]);
+  if (!isPositiveInt(n)) return 406;
+  if (n > gaInteractions.length) return 407;
+  if (a[1] == "id")
+  {
+    if ((!val) || (val == "") || (!IsValidIeeeIdentifier(val))) return 406;
+    if (n == gaInteractions.length)
+    {
+      gaInteractions[n] = new Interaction(val);
+    }
+    else
+    {
+      gaInteractions[n].id = val;
+    }
+  }
+  else
+  {
+    if (n > gaInteractions.length - 1) return 407; // doesn't exist
+    if (gaInteractions[n].id == null) return 408; // id not set yet
+    switch(a[1])
+    {
+      case "type":
+        if (gaInteractions[n].type != null)
+        {
+          if (gaInteractions[n].type == val) return 0; // nothing to do
+          return 351; // can't redefine
+        }
+        if (isValidInteractionType(val)) gaInteractions[n].type = val;
+        else nErr = 351; // invalid type token
+        break;
+      case "latency":
+        gaInteractions[n].latency = val;
+        break;
+      case "timestamp":
+        gaInteractions[n].timestamp = val;
+        break;
+      case "result":
+        gaInteractions[n].result = val;
+        break;
+      case "weighting":
+        gaInteractions[n].weighting = val;
+        break;
+      case "description":
+        gaInteractions[n].description = val;
+        break;
+      case "correct_responses":
+        nErr = SetCorrectResponses(n, a[2], a[3], val);
+        break;
+      case "learner_response":
+        gaInteractions[n].learnerResponse = val;
+        break;
+      case "objectives":
+        if ((isPositiveInt(a[2]))
+            && (a[2] <= gaInteractions[n].objectives.length)
+            && (a[3] == "id"))
+        {
+          gaInteractions[n].objectives[a[2]] = val;
+        }
+        else nErr = 351;
+        break;
+      default:
+        nErr = 351;
+        break;
+    }
+  }
+  return nErr
+}
+
+function GetValueInteractions(what)
+{
+  // what = the part of the element name after "cmi.interactions."
+  var nErr = 0;
+  var r = "";
+  if (what == "_count")
+  {
+    if (!gaInteractions) return "0";
+    else return gaInteractions.length + "";
+  }
+  if (what == "_children") return "id,type,latency,timestamp,result,weighting,description,correct_responses,learner_response";
+  var a = what.split(".");
+  var n = a[0];
+  if (!isPositiveInt(n)) nErr = 406;
+  else if (!gaInteractions) nErr == 407;
+  else if (n > gaInteractions.length - 1) nErr = 407;
+  else switch(a[1])
+    {
+      case "id":
+        r = gaInteractions[n].id;
+        break;
+      case "type":
+        r = gaInteractions[n].type;
+        break;
+      case "latency":
+        r = gaInteractions[n].latency;
+        break;
+      case "timestamp":
+        r = gaInteractions[n].timestamp;
+        break;
+      case "result":
+        r = gaInteractions[n].result;
+        break;
+      case "weighting":
+        r = gaInteractions[n].weigting;
+        break;
+      case "description":
+        r = gaInteractions[n].description;
+        break;
+      case "correct_responses":
+      	if (a[2] == "_count")
+      	{
+      		r = gaInteractions[n].correctResponses.length + "";
+      	}
+      	else
+      	{
+        	var a = GetCorrectResponses(n, a[2], a[3]);
+        	if (a[0] != 0) nErr = a[0]; else r = a[1];
+        }
+        break;
+      case "learner_response":
+        r = gaInteractions[n].learnerResponse ;
+        break;
+      case "objectives":
+        if (a[2] == "_count")
+        {
+        	r = gaInteractions[n].objectives.length +"";
+        }
+        else if ((isPositiveInt(a[2]))
+            && (a[2] < gaInteractions[n].objectives.length)
+            && (a[3] == "id"))
+        {
+          r = gaInteractions[n].objectives[a[2]];
+        }
+        else nErr = 351;
+        break;
+      default:
+        nErr = 351;
+        break;
+    }
+  if (nErr != 0) gnErr = nErr;
+  return r
+}
+
+function SetValueLearnerPreference(what,val)
+{
+  var nErr = 0;
+  var r = "true";
+  switch (what)
+  {
+    case "audio_captioning":
+      if ((val != "-1") || (val != "0") || (val != 1))
+      {
+        nErr = 406; // TBD correct
+      }
+      else
+      {
+        gLearnPrefAudioCaptioning = val;
+      }
+      return "false";
+      break;
+    case "audio_level":
+      var n = parseFloat(val);
+      if ((isNaN(n)) || (n < 0))
+      {
+        nErr == 406; // TBD correct error
+      }
+      else
+      {
+        gLearnPrefAudioLevel = val
+      }
+      break;
+    case "delivery_speed":
+      var n = parseFloat(val);
+      if ((isNaN(n)) || (n < 0))
+      {
+        nErr == 406; // TBD correct error
+      }
+      else
+      {
+        gLearnPrefDeliverySpeed = val;
+      }
+      break;
+    case "language":
+      gLearnPrefLanguage = val;
+      break;
+    default:
+      nErr = 401; // TBD correct err value
+      break;
+  }
+  return nErr;
+}
+
+function GetValueLearnerPreference(what)
+{
+  var nErr = 0;
+  var r = "";
+  switch (what)
+  {
+    case "_children":
+      r = "audio_captioning,audio_level,delivery_speed,language";
+      break;
+    case "audio_captioning":
+      r = gLearnPrefAudioCaptioning;
+      break;
+    case "audio_level":
+      r = gLearnPrefAudioLevel;
+      break;
+    case "delivery_speed":
+      r = gLearnPrefDeliverySpeed; break;
+    case "language":
+      r = gLearnPrefLanguage;
+      break;
+    default:
+      nErr = 401; // TBD correct err value
+      break;
+  }
+  if (nErr != 0) gnErr = nErr;
+  return r;
+}
+
+function Objective(id) // Constructor for a new objective record
+{
+  this.id = id;
+  this.description = "";
+  this.score = new Score();
+  this.success_status = "unknown";
+  this.completion_status = "unknown";
+  this.progress_measure = "0";
+  return this;
+}
+
+function IsValidSuccessStatus(val)
+{
+  var a = new Array("passed","failed","unknown");
+  //alert(a.toString() + '\n"' + val + '"')
+  for (var i=0;i<a.length;i++)
+  {
+    if (val==a[i]) return true;
+  }
+  return false;
+}
+
+function IsValidCompletionStatus(val)
+{
+  var a = new Array("completed","incomplete","not attempted","unknown");
+  for (var i=0;i<a.length;i++) if (val==a[i]) return true;
+  return false;
+}
+
+function SetValueObjectives(what, val)
+{
+  // what = the part of the element name after "objectives."
+  var nErr = 0;
+  var a = what.split(".");
+  var n = parseInt(a[0]);
+  if (!isPositiveInt(n)) return 406;
+  if (n > gaObjectives.length) return 407;
+  if (a[1] == "id")
+  {
+    if ((!val) || (val == "") || (!IsValidIeeeIdentifier(val))) return 406;
+    if (n == gaObjectives.length)
+    {
+      // tbd add uniqueness check here
+      var bOK = true;
+      for (var i=0;i<gaObjectives.length;i++)
+      {
+        if (gaObjectives[i].id == val) bOK = false;
+      }
+      if (bOK)  gaObjectives[n] = new Objective(val);
+      else nErr = 351; // duplicate; err code TBD on final Rel 3.
+    }
+    else
+    {
+      if (gaObjectives[n].id != val)
+      {
+        nErr = 404; // Cannot change ID; err code TBD on final Rel 3.
+      }
+    }
+  }
+  else
+  {
+    if (n > gaObjectives.length - 1) return 407; // doesn't exist
+    if (gaObjectives[n].id == null) return 408; // id not set yet
+    switch(a[1])
+    {
+      case "description":
+        gaObjectives[n].description = val;
+        break;
+      case "success_status":
+        if (IsValidSuccessStatus(val)) gaObjectives[n].success_status = val;
+        else nErr = 406;
+        break;
+      case "completion_status":
+        if (IsValidCompletionStatus(val)) gaObjectives[n].completion_status = val;
+        else nErr = 406;
+        break;
+      case "progress_measure":
+        if ((!isNaN(n)) && (n >= 0.0) && (n <= 1.0)) gaObjectives[n].progress_measure = val;
+        else nErr = 406;
+        break;
+      case "score":
+        // a2 = "scaled" | "min" | "max" | "raw"
+        nErr = SetValueScore(gaObjectives[n].score, a[2], val);
+        break;
+      default:
+        nErr = 351;
+        break;
+    }
+  }
+  return nErr
+}
+
+function GetValueObjectives(what)
+{
+  // what = the part of the element name after "objectives."
+  if (what == "_children")
+  {
+  	return "id,score,success_status,completion_status,progress_measure,description";
+  }
+  else if (what == "_count")
+  {
+  	return gaObjectives.length + "";
+  }
+  var nErr = 0;
+  var r = "";
+  var a = what.split(".");
+  var n = parseInt(a[0]);
+  if (!isPositiveInt(n)) nErr = 406;
+  else if (n > gaObjectives.length - 1) nErr = 407;
+  else switch(a[1])
+    {
+      case "completion_status":
+        r = gaObjectives[n].completion_status;
+        break;
+      case "description":
+        r = gaObjectives[n].description;
+        break;
+      case "id":
+        r = gaObjectives[n].id;
+        break;
+      case "progress_measure":
+        r = gaObjectives[n].progress_measure;
+        break;
+      case "score":
+        // a2 = "scaled" | "min" | "max" | "raw"
+        r = GetValueScore(gaObjectives[n].score, a[2]);
+        break;
+      case "success_status":
+        r = gaObjectives[n].success_status;
+        break;
+      default:
+        nErr = 351;
+        break;
+    }
+  if (nErr != 0) gnErr = nErr;
+  return r
+}
+
+function SetValueSuspendData(val)
+{
+  if (val.length <= 64000)
+  {
+    gSuspendData = val;
+    if (val.length > 4000)
+    {
+      // Maybe add a compatibility warning here
+    }
+    return 0;
+  }
+  else
+  {
+    return 351;
+  }
+}
+
+function SetValueSuspendLocation(val)
+{
+  if (val.length <= 1000)
+  {
+    gSuspendLocation = val;
+    return 0;
+  }
+  else
+  {
+    return 351;
+  }
+}
+
+
+
+function CmiComment()
+{
+  this.comment = "";
+  this.location = "";
+  this.timestamp = "";
+}
+
+function SetValueCommentFromLearner(what, val)
+{
+  // what = n.element
+  var nErr = 0;
+  var aTemp = null
+  var a = what.split(".");
+  var n = parseInt(a[0]);
+  if (!isPositiveInt(n)) return 406;
+  if (n > gaCommentsFromLearner.length) return 407;
+  if (n == gaCommentsFromLearner.length) aTemp = new CmiComment()
+  else aTemp = gaCommentsFromLearner[n];
+  switch(a[1])
+  {
+    case "comment":
+      aTemp.comment = val;
+      break;
+    case "location":
+      aTemp.location = val;
+      break;
+    case "timestamp":
+      aTemp.timestamp = val;
+      break;
+    default:
+      nErr = 403; // TBD adjust this error
+  }
+  if (nErr == 0) gaCommentsFromLearner[n] = aTemp;
+  return nErr
+}
+
+function GetValueCommentFromLearner(what)
+{
+  // what = n.element
+  var nErr = 0;
+  var r = null;
+  if (what == "_children") return "comment,location,timestamp";
+  if (what == "_count") return gaCommentsFromLearner.length.toString();
+  var a = what.split(".");
+  var n = parseInt(a[0]);
+  if (!isPositiveInt(n)) return 406;
+  else if (n > gaCommentsFromLearner.length - 1)
+  {
+    nErr = 407 // TBD Adjust
+  }
+  else
+  {
+    switch(a[1])
+    {
+      case "comment":
+        r = gaCommentsFromLearner[n].comment;
+         break;
+      case "location":
+        r = gaCommentsFromLearner[n].location;
+        break;
+      case "timestamp":
+        r = gaCommentsFromLearner[n].timestamp;
+        break;
+      default:
+        nErr = 403; // TBD adjust this error
+    }
+  }
+  if (nErr != 0) gnErr = nErr;
+  return r
+}
+
+function GetValueCommentFromLms(what)
+{
+  // what = n.element
+  var nErr = 0;
+  var r = null;
+  if (what == "_children") return "comment,location,timestamp";
+  if (what == "_count") return gaCommentsFromLms.length;
+  var a = what.split(".");
+  var n = parseInt(a[0]);
+  if (!isPositiveInt(n)) return 406;
+  else if (n > gaCommentsFromLms.length - 1)
+  {
+    nErr = 407 // TBD Adjust
+  }
+  else
+  {
+    switch(a[1])
+    {
+      case "comment":
+        r = gaCommentsFromLms[n].comment;
+        break;
+      case "location":
+        r = gaCommentsFromLms[n].location;
+        break;
+      case "timestamp":
+        r = gaCommentsFromLms[n].timestamp;
+        break;
+      default:
+        nErr = 403; // TBD adjust this error
+    }
+  }
+  if (nErr != 0) gnErr = nErr;
+  return r
+}
+
+function SetValueSessionTime(val)
+{
+  gnErr = 0;
+  n = ISODurationToCentisec(val);
+  if (gnErr == 0) gnSessionTime = n;
+  return gnErr;
+}
+
+function SetValueSuccessStatus(val)
+{
+  if (IsValidSuccessStatus(val))
+  {
+    gsPrimarySuccessStatus = val;
+    gnErr = 0;
+  }
+  else
+  {
+    gnErr = 406;
+  }
+  return gnErr;
+}
+
+function GetValueSuccessStatus(val)
+{
+  var n = parseFloat(GetValueScore(gaScore, "scaled"));
+  if (!isNaN(n))
+  {
+    if (n >= gn_PassingScore) return "passed";
+    else return "failed";
+  }
+  return gsPrimarySuccessStatus;
+}
+
+function SetValueCompletionStatus(val)
+{
+  if (IsValidCompletionStatus(val))
+  {
+    gsPrimaryCompletionStatus = val;
+    gnErr = 0;
+  }
+  else
+  {
+    gnErr = 406;
+  }
+  return gnErr;
+}
+
+function GetValueCompletionStatus(val)
+{
+  var n = parseFloat(GetValueByName("progress_measure"));
+  if (!isNaN(n))
+  {
+    if (n >= gn_CompletionThreshold) return "completed";
+    else return "incomplete";
+  }
+  return gsPrimaryCompletionStatus;
+}
+
+
+function _SetValue(what, val)
+{
+  var nErr = 0;
+  var r = "false";
+  gnErr = 0;
+  if (gnRTECommState < 1)
+  {
+    nErr = 132; // tbd
+  }
+  else if (gnRTECommState > 2)
+  {
+    nErr = 133; // tbd
+  }
+  if (nErr == 0)
+  {
+    var a = what.split(".");
+    switch (a[0])
+    {
+      case "cmi":
+        switch(a[1])
+        {
+          case "comments_from_learner":
+            nErr = SetValueCommentFromLearner(StripLeadingDots(what,2),val);
+            break;
+          case "comments_from_lms":
+          case "completion_threshold":
+          case "entry":
+          case "launch_data":
+          case "max_time_allowed":
+          case "mode":
+          case "scaled_passing_score":
+          case "time_limit_action":
+          case "total_time":
+            nErr = 404;
+            break;
+          case "completion_status":
+            nErr = SetValueCompletionStatus(val);
+            break;
+          case "exit":
+            switch(val)
+            {
+              case "suspend":
+                gbSuspended = true;
+                break;
+              case "":
+              case "logout":
+              case "normal":
+              case "time-out":
+                break;
+              default:
+                nErr = 404;
+                break;
+            }
+            break;
+          case "interactions":
+            nErr = SetValueInteractions(StripLeadingDots(what,2),val);
+             break;
+          case "learner_preference":
+            nErr = SetValueLearnerPreference(StripLeadingDots(what,2),val);
+            break;
+          case "location":
+            nErr = SetValueSuspendLocation(val);
+            break;
+          case "objectives":
+            nErr = SetValueObjectives(StripLeadingDots(what,2),val);
+            break;
+          case "progress_measure":
+            // TBD add validation
+            nErr = SetValueByName(StripLeadingDots(what,1), val);
+            break;
+          case "score":
+            nErr = SetValueScore(gaScore,StripLeadingDots(what,2),val);
+            break;
+          case "session_time":
+            nErr = SetValueSessionTime(val);
+            break;
+          case "success_status":
+            nErr = SetValueSuccessStatus(val);
+            break;
+            break;
+          case "suspend_data":
+            nErr = SetValueSuspendData(val);
+            break;
+          default:
+            nErr = 401; // SetValueByName(StripLeadingDots(what,1), val);
+            break;
+        }
+        break;
+      case "adl":
+        if (a[1] == "nav")
+        {
+          if (a[2] == "request")
+          {
+            switch(val)
+            {
+              case "continue":
+              case "previous":
+              case "exit":
+              case "exitAll":
+              case "abandon":
+              case "abandonAll":
+              case "_none_":
+                nErr = SetValueByName(what, val);
+                break;
+              default:
+                if ((val.indexOf("choice") < 8) ||
+                    (val.indexOf("{target=") != 0) ||
+                    (val.indexOf("}") != val.indexOf("choice") - 1))
+                {
+                  nErr = 406;
+                }
+                break;
+            }
+          }
+          else
+          {
+            nErr = 406;
+          }
+        }
+        else
+        {
+          LogWarning(gs_UNRECOGNIZED_DM);
+          nErr = 401;
+        }
+        break;
+      default:
+        if (what == "")
+        {
+          nErr = 406;
+        }
+        else
+        {
+          LogWarning(gs_UNRECOGNIZED_DM);
+          nErr = 401;
+        }
+    }
+  }
+  if ((nErr == 0) && (gnErr != 0)) nErr = 0;
+  gnErr = nErr;
+  r = ((gnErr == 0).toString());
+  return r
+}
+
+function _GetValue(what)
+{
+  var r = "";
+  var nErr = 0;
+  if (gnRTECommState < 1)
+  {
+    nErr = 122;
+  }
+  else if (gnRTECommState > 2)
+  {
+    nErr = 123; // tbd
+  }
+
+  if (nErr == 0)
+  {
+    var a = what.split(".")
+    gnErr = 0;
+    switch (a[0])
+    {
+      case "cmi":
+        switch(a[1])
+        {
+        	case "_version":
+        		r = "1.0."
+        		break;
+          case "comments_from_learner":
+            r = GetValueCommentFromLearner(StripLeadingDots(what,2));
+            break;
+          case "comments_from_lms":
+            r = GetValueCommentFromLms(StripLeadingDots(what,2));
+            break;
+          case "completion_status":
+            r = GetValueCompletionStatus();
+            break;
+            break;
+          case "completion_threshold":
+            r = ""; // tbd add a feature to preset threshold and test
+            break;
+          case "credit":
+            if (!gRTEPresetCredit) gRTEPresetCredit = "credit";
+            r = gRTEPresetCredit;
+            break;
+          case "entry":
+            if (gbResume) r = "resume";
+            else r = "ab-initio";
+            break;
+          case "exit":
+            r = "";
+            nErr = 405;
+            break;
+          case "interactions":
+             r = GetValueInteractions(StripLeadingDots(what,2));
+             break;
+          case "launch_data":
+            r = "";
+            break;
+          case "learner_id":
+            r = gs_Learner_Id;
+            break;
+          case "learner_name":
+            r = gs_DFLT_LEARNER_NAME;
+            break;
+          case "learner_preference":
+            r = GetValueLearnerPreference(StripLeadingDots(what,2));
+            break;
+          case "location":
+            r = gSuspendLocation;
+            break;
+          case "max_time_allowed":
+            r = "";
+            break;
+          case "mode":
+            r = ((gRTEPresetBrowse=="")?"normal":gRTEPresetBrowse);
+            break;
+          case "objectives":
+             r = GetValueObjectives(StripLeadingDots(what,2));
+             break;
+          case "progress_measure":
+            r = GetValueByName(StripLeadingDots(what,1));
+            break;
+          case "scaled_passing_score":
+            r = gn_PassingScore.toString();
+            break;
+          case "score":
+            r = GetValueScore(gaScore,StripLeadingDots(what,2))
+             break;
+          case "session_time":
+            r = "";
+            nErr = 405;
+            break;
+          case "success_status":
+            r = GetValueSuccessStatus();
+            break;
+          case "suspend_data":
+            r = gSuspendData;
+            break;
+          case "time_limit_action":
+            r = "continue,no message";
+            break;
+          case "total_time":
+            r = centisecsToISODuration(gnTotalAttemptTime);
+            break;
+          case "version":
+            r = "1.0";
+            break;
+          default:
+            r = ""; // GetValueByName(StripLeadingDots(what,1));
+            nErr = 401;
+          break;
+        }
+        break;
+      case "adl":
+        if (a[1] == "nav")
+        {
+          if (a[2] == "request")
+          {
+            switch(a[3])
+            {
+              case "continue":
+              case "previous":
+              case "exit":
+              case "exitAll":
+              case "abandon":
+              case "abandonAll":
+              case "_none_":
+                r = GetValueByName(what);
+                break;
+              default:
+                if ((val.indexOf("choice") < 8) ||
+                    (val.indexOf("{target=") != 0) ||
+                    (val.indexOf("}") != val.indexOf("choice") - 1))
+                {
+                  nErr = 406;
+                }
+                break;
+            }
+          }
+          else if (a[2] == "request_valid")
+          {
+            switch(a[3])
+            {
+              case "continue":
+              case "previous":
+                r = "unknown";
+                break;
+              case "choice":
+                if (a[4].indexOf("{target=") == 0) r = "unknown";
+                else nErr = 406;
+                break;
+              default:
+                nErr = 406;
+                break;
+            }
+          }
+          else
+          {
+            nErr = 406;
+          }
+        }
+        break;
+      default:
+        if (what == "")
+        {
+          nErr = 406;
+        }
+        else
+        {
+          LogWarning(gs_UNRECOGNIZED_DM);
+          nErr = 201;
+        }
+        break;
+    }
+  }
+  if ((nErr == 0) && (gnErr != 0)) nErr = 0;
+  gnErr = nErr;
+  return r + "";
+}
+
+function _Initialize(parm)
+{
+  gnErr = 0;
+  var r = "true";
+
+  if (gnRTECommState == 0)
+  {
+    r = "true";
+    gbInScoLaunch = false;
+    gnRTECommState = 1;
+  }
+  else if (gnRTECommState < 3)
+  {
+    r = "false";
+    gnErr = 103;
+  }
+  else if (gnRTECommState > 2)
+  {
+    r = "false";
+    gnErr = 104;
+  }
+  return r + "";
+}
+
+function _Terminate(parm)
+{
+  gnErr = 0;
+  var r = null;
+  if (gnRTECommState == 0)
+  {
+    r = "false";
+    gnErr = 112;
+  }
+  else if (gnRTECommState == 1)
+  {
+    r = "true";
+    gnRTECommState = 3;
+  }
+  else
+  {
+    r = "false";
+    gnErr = 113;
+  }
+  return r + "";
+}
+
+function _Commit(parm)
+{
+  gnErr = 0;
+  var r = "true";
+  if (gnRTECommState < 1)
+  {
+    gnErr = 142;
+    r = "false";
+  }
+  if (gnRTECommState > 2)
+  {
+    gnErr = 143;
+    r = "false";
+  }
+  return r;
+}
+
+function _GetLastError(parm)
+{
+  var r = "";
+  r = gnErr;
+  return r + "";
+}
+
+function _GetErrorString(parm)
+{
+  var r = null;
+
+  if ((gbDebugSession) && (typeof parm == 'number' && isFinite(parm)))
+  {
+    alert("GetErrorString called with numeric value, should be string: " + parm);
+  }
+  var n = parseInt(parm);
+  if (isNaN(n))
+  {
+    gnErr = 406; // Type mismatch
+    return "";
+  }
+  switch (n)
+  {
+    case 101: r = "General exception"; break;
+    case 102: r = "General initialization failure"; break;
+    case 103: r = "Already initialized"; break;
+    case 104: r = "Content instance terminated"; break;
+    case 111: r = "General termination failure"; break;
+    case 112: r = "Termination before initialization"; break;
+    case 113: r = "Termination after termination"; break;
+    case 122: r = "Retrieve data before initialization"; break;
+    case 123: r = "Retrieve data after termination"; break;
+    case 132: r = "Store data before initialization"; break;
+    case 133: r = "Store data after termination"; break;
+    case 142: r = "Commit before initialization"; break;
+    case 143: r = "Commit after termination"; break;
+    case 201: r = "General argument error"; break;
+    case 302: r = "General get failure"; break;
+    case 351: r = "General set failure"; break;
+    case 391: r = "General commit failure"; break;
+    case 401: r = "Undefined data model element"; break;
+    case 402: r = "Unimplemented data model element"; break;
+    case 403: r = "Data model element value not initialized"; break;
+    case 404: r = "Data model element is read only"; break;
+    case 405: r = "Data model element is write only"; break;
+    case 406: r = "Data model element type mismatch"; break;
+    case 407: r = "Data model element value out of range"; break;
+    case 408: r = "Data model element dependency not established"; break;
+    default: r = "General exception"; break;
+  }
+  return r + "";
+}
+function _GetDiagnostic(parm)
+{
+  var r = null;
+  r = "SCORM 2004 SCO player by Claude Ostyn"
+  return r + "";
+}
+
+
+// ========= API INSTANCE ===========
+var API_1484_11 = new Object();
+API_1484_11.SetValue = _SetValue;
+API_1484_11.GetValue = _GetValue;
+API_1484_11.Initialize = _Initialize;
+API_1484_11.Terminate = _Terminate;
+API_1484_11.Commit = _Commit;
+API_1484_11.GetLastError = _GetLastError;
+API_1484_11.GetErrorString = _GetErrorString;
+API_1484_11.GetDiagnostic = _GetDiagnostic;
+API_1484_11.version = "1.0.ostyn-test-wrap";
+
+
+// ========= END API INSTANCE ===========
+
+// ========= MANAGEMENT OF THE TESTED SCO =========
+
+function FileNameToUrl(url)
+{
+  p = url.indexOf(":\\");
+  if (p < 0) return url;
+  if (p == 2) url = url.substr(1); // clear leading backslash
+  rExp = /\\/gi;
+  url = url.replace(rExp,"/");
+  return url;
+}
+
+function LocalPath(url)
+{
+  if (url) s = url;
+  else s = FileNameToUrl(window.location.href);
+  p = s.indexOf("?");
+  if (p > -1) s = s.substr(0,p);
+  p = s.lastIndexOf("/");
+  s = s.substr(0,p+1);
+  return s;
+}
+
+function ShorterRelativeUrl(refUrl,url)
+{
+  // Returns the relative, shortened version of the url param
+  // Works only if refUrl is in a parent path of the url path
+  var s1 = LocalPath(refUrl);
+  if (url.indexOf(s1) == 0)
+  {
+    url = url.substr(s1.length);
+  }
+  return url;
+}
+
+var gbSCOLoaded = false;
+var gsLastScoUrl = null;
+var gTimerLoadSCOWait = null;
+var gnTimerLoadSCOWaitMaxIterations = 50; // will be set dynamically
+var gnTimerLoadSCOWaitMaxMilliseconds = 3000;
+
+var gStageWindow = null;
+var gWndPopupStage = null;
+
+function LoadSCO(url)
+{
+  if ((url == null) || (url == "")) return;
+
+  url = FileNameToUrl(url);
+  if ((url.indexOf(":/")!= 1) && (url.indexOf("http:") != 0) && (url.indexOf("file:") != 0))
+  {
+    //alert("LocalPath = " + LocalPath() + "\nURL = " + url);
+    url = LocalPath() + url;
+  }
+  if ((url.indexOf("http:") != 0) && (url.indexOf("file://") != 0))
+  {
+    url = "file:///" + url;
+  }
+  ResetAttempt();
+  ResetSession();
+  gsLastScoUrl = url;
+  window.status = url;
+
+  // In Firefox, there is a problem with attempting to load
+  // the SCO as part of the thread that loads the wrapper itself.
+  // Simplest workaround is to wait 1/4 second.
+  self.setTimeout('DelayedSCOLoader("' + url + '")', 500)
+}
+
+function DelayedSCOLoader(url)
+{
+  gbInScoLaunch = true;
+  gStageWindow = wndSCORM2004Stage
+  wndSCORM2004Stage.location = url;
+  gbSCOLoaded = true;
+  self.setTimeout('DelayedClearLaunchFlag()', 1000)
+}
+
+function DelayedClearLaunchFlag()
+{
+  gbInScoLaunch = false;
+}
+
+
+
+function UnloadSCO()
+{
+  wndSCORM2004Stage.location.href = "about:blank";
+  gbInScoLaunch = false;
+  gbSCOLoaded = false;
+}
+
+function EndAttempt()
+{
+  UnloadSCO();
+  // There might be some asynchronous stuff
+  // happening. Give it a chance to happen.
+  self.setTimeout('EndAttemptPart2()',1000);
+}
+
+function EndAttemptPart2()
+{
+  ResetAttempt();
+}
+
+function SetWindowDocument(wnd, sDoc)
+{
+  with (wnd.document)
+  {
+    open();
+    write(sDoc);
+    close();
+  }
+  return true;
+}
+
+
+//alert("ok")
+
+function HelpInStage(wnd)
+{
+  if (!wnd) wnd = wndSCORM2004Stage;
+  SetWindowDocument(wnd, gs_HELP_TEXT);
+}
+
+var gWndPopupHelp = null;
+function HelpPopup()
+{
+  if ((!gWndPopupHelp) || (gWndPopupHelp.closed))
+  {
+    gWndPopupHelp = window.open("about:blank","wndHelp",
+      "width=640,height=500,resizable=yes,scrollbars=yes,location=no");
+  }
+  HelpInStage(gWndPopupHelp);
+  gWndPopupHelp.focus();
+}
+
+
+// ========= INITIALIZATION =========
+
+
+function Help()
+{
+  // alert("Sorry, help not available yet.")
+  HelpPopup();
+}
+
+
+function init()
+{
+  if (document.getElementById == "undefined")
+  {
+    alert (gs_ERR_LO_BROWSER);
+    return;
+  }
+  var url = GetURLParam("SCO");
+  if ((!url) || (url==""))
+  {
+  	url = g_SCO_to_Launch;
+  }
+  if ((url != null) && (url != ""))
+  {
+    LoadSCO(url)
+  }
+  else
+  {
+    HelpInStage();
+  }
+}
+
+function cleanup()
+{
+  try {if (gWndPopupStage) gWndPopupStage.close();}
+  catch(e){}
+  try {if (gWndPopupHelp) gWndPopupHelp.close();}
+  catch(e){}
+  try {if (gWndOptionsPopup) gWndOptionsPopup.close();}
+  catch(e){}
+}
+
+//]]>
+</script>
+</head>
+
+<frameset rows="100%,*" border="no" onload="init()">
+    <frame id="wndSCORM2004Stage" name="wndSCORM2004Stage" src=
+    "about:blank" border="no" scrolling="auto"/>
+    <frame id="dummy" border="no" name="dummy" src=
+    "about:blank"/>
+  </frameset>
+
+  <noframes>
+    <body>
+      <p>This web page is used to play a SCO. Because of
+      the way it functions it requires a frame-enabled browser.</p>
+
+      <div>
+        <noscript>
+        <p>This web page is used for to play a SCO. It requires
+        JavaScript to function. If you cannot use
+        JavaScript you should not use this web page.</p></noscript>
+      </div>
+    </body>
+  </noframes>
+</frameset>
+</html>

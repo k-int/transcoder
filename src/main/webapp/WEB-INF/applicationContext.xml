@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:jee="http://www.springframework.org/schema/jee"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans 
+           http://www.springframework.org/schema/beans/spring-beans-2.5.xsd
+           http://www.springframework.org/schema/context
+           http://www.springframework.org/schema/context/spring-context-2.5.xsd
+           http://www.springframework.org/schema/jee
+           http://www.springframework.org/schema/jee/spring-jee-2.5.xsd">
+           
+     
+ 
+  <bean id="placeholderConfig" class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+    <property name="location">
+		<value>/WEB-INF/deployment.properties</value>
+	</property>
+  </bean>
+   
+  <bean id="TranscoderDataSource" class="org.apache.commons.dbcp.BasicDataSource">
+    <property name="driverClassName"><value>${hibernate.jdbc_driver}</value></property>
+    <property name="username"><value>${hibernate.username}</value></property>
+    <property name="password"><value>${hibernate.password}</value></property>
+    <property name="url"><value>${hibernate.url}</value></property>
+    <property name="defaultAutoCommit"><value>${hibernate.default_auto_commit}</value></property>
+    <property name="maxActive"><value>20</value></property>
+    <property name="maxIdle"><value>3</value></property>
+  </bean>
+  
+  <bean id="TranscoderSessionFactory" class="org.springframework.orm.hibernate3.annotation.AnnotationSessionFactoryBean">
+    <property name="dataSource"><ref local="TranscoderDataSource"/></property>
+    <property name="configurationClass"><value>org.hibernate.cfg.AnnotationConfiguration</value></property> 
+    <property name="annotatedClasses">
+      <list>
+        <value>com.k_int.transcoder.form.Upload</value>
+        <value>com.k_int.transcoder.form.Form</value>
+      </list>
+    </property>
+    <property name="hibernateProperties">
+      <props>
+        <prop key="hibernate.dialect">${hibernate.dialect}</prop>
+        <prop key="hibernate.hbm2ddl.auto">${hibernate.hbm2ddl.auto}</prop>
+      </props>
+    </property>
+  </bean>
+           
+  <bean id="TranscoderService" class="com.k_int.transcoder.service.TranscoderImpl" />
+  
+</beans>

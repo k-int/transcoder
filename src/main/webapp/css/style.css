@@ -1,0 +1,101 @@
+body {text-align: center;
+	 }
+
+h2 {letter-spacing: 8px;
+	color: #003366;}
+h4	{margin: 0px;
+	text-align: left;
+	color: #003366;}		
+hr {width:400px; 
+	text-color: #8899cc;
+	margin-top: 20px;
+ 	margin-bottom: 20px;}
+
+div.main {text-align: center;
+		  width: 700px;
+		  margin-top: 20px;
+	      margin-bottom: 20px;
+	      margin-right: auto;	
+	      margin-left: auto;
+	      padding: 20px 10px 20px 10px;
+	      border: thick ridge #7788bb;
+		   }
+		  
+div.description {margin-top: 10px;
+ 		  margin-bottom: 10px;
+ 		  margin-right: auto;	
+	      margin-left: auto;
+	      width:500px;
+	      color: #7788bb;
+		  font-weight:bold;}
+ 		  
+div.step {background-color: #eaefff; 
+	      width:500px;
+	      border-style: ridge;
+	      border-color: #8899cc;
+	      border-width: 2px;
+	      margin-top: 20px;
+	      margin-bottom: 20px;
+	      margin-right: auto;	
+	      margin-left: auto;
+	      padding: 10px 10px 10px 10px;
+	      }
+	      
+div.about {background-color: #eaefff; 
+	      width:500px;
+	      border-style: ridge;
+	      border-color: #8899cc;
+	      border-width: 2px;
+	      margin-top: 20px;
+	      margin-bottom: 20px;
+	      margin-right: auto;	
+	      margin-left: auto;
+	      padding: 10px 10px 10px 10px;
+	      text-align: left;
+	      }	      
+	      
+	      
+input { margin: 10px;}
+select { margin: 10px;}
+
+div.info {	font-size: medium;
+			font-weight: bold; }
+div.info ul {list-style: none;}
+span.actionMessage {color: #445599; }	 
+span.errorMessage {color: #cc0000; }
+
+table tr td.question {color: #7788bb;
+					 font-weight: bold;
+					 vertical-align: bottom;
+					 height: 60px;} 
+
+table.form input { margin: 0px;}
+
+					 
+div.form {width:500px;
+	      margin-top: 20px;
+	      margin-bottom: 20px;
+	      margin-right: auto;	
+	      margin-left: auto;
+	      }
+	      
+div.link {margin-top: 30px;
+	      margin-bottom: 30px;
+		  align: center;}
+	      
+div.acknowledgement {color: #7788bb;
+					font-weight:bold;}
+div.download {background-color: #eaefff; 
+	      width:500px;
+	      border-style: ridge;
+	      border-color: #8899cc;
+	      border-width: 2px;
+	      margin-top: 20px;
+	      margin-bottom: 20px;
+	      margin-right: auto;	
+	      margin-left: auto;
+	      padding: 10px 10px 10px 10px;
+		  text-align:left;}	   
+ul.download_list {list-style: square;}	    
+	      
+     
