@@ -2,11 +2,6 @@
 
 <project>
   <modelVersion>4.0.0</modelVersion>
-   <parent>
-    <artifactId>parent</artifactId>
-    <groupId>com.k-int.transcoder</groupId>
-    <version>1.0-SNAPSHOT</version>
-  </parent>
   <groupId>com.k-int.transcoder</groupId>
   <artifactId>transcoder-web</artifactId>
   <packaging>war</packaging>
@@ -14,6 +9,13 @@
   <name>Transcoder</name>
   <url>http://www.k-int.com</url>
   <description>E-learning content transformation</description>
+
+  <scm>
+    <connection>scm:svn:svn://developer.k-int.com/home/svn/repositories/transcoder/transcoder/dev/trunk</connection>
+    <developerConnection>scm:svn:svn://developer.k-int.com/home/svn/repositories/transcoder/transcoder/dev/trunk</developerConnection>
+  </scm>
+
+
   
   <dependencies>
     <!--  Struts 2 -->
@@ -83,4 +85,18 @@
         </plugin>
       </plugins>
     </build>
+
+  <distributionManagement>
+    <repository>
+      <id>k-int-releases</id>
+      <name>Knowledge Intergation Maven2 Repository</name>
+      <url>http://projects.k-int.com:8081/nexus-webapp-1.4.0/content/repositories/releases</url>
+    </repository>
+    <snapshotRepository>
+      <id>k-int-snapshots</id>
+      <name>Knowledge Intergation Maven2 Snapshot Repository</name>
+      <url>http://projects.k-int.com:8081/nexus-webapp-1.4.0/content/repositories/snapshots</url>
+    </snapshotRepository>
+  </distributionManagement>
+
 </project>
